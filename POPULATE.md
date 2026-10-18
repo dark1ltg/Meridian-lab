@@ -1,9 +1,10 @@
-# Finish populating Meridian-lab (one command)
+# Meridian-lab setup (separate repo + separate Cursor workspace)
 
-Cloud Agent cannot `git push` to this repo (Cursor GitHub App has no write access on Meridian-lab).
-GitHub MCP can write files as your user, but uploading the full tree + binaries through that API is slow.
+`dark1ltg/Meridian-lab` is the experimental fork. Stable product stays in `dark1ltg/Meridian`.
 
-From any machine where you are logged into GitHub as **dark1ltg**:
+## 1. Finish the repo copy (one command)
+
+From a machine logged in as **dark1ltg**:
 
 ```bash
 git clone --bare https://github.com/dark1ltg/Meridian.git /tmp/Meridian.git
@@ -11,12 +12,13 @@ cd /tmp/Meridian.git
 git push --mirror https://github.com/dark1ltg/Meridian-lab.git
 ```
 
-Then replace the lab README banner (mirror overwrites it):
+That copies full history, fonts, and screenshots. (This Cloud Agent cannot `git push` here.)
 
-```bash
-git clone https://github.com/dark1ltg/Meridian-lab.git
-cd Meridian-lab
-# prepend the experimental banner to README.md, commit, push
-```
+## 2. Open a NEW Cursor workspace (required)
 
-Or grant the **Cursor** GitHub App **Contents: Read and write** on `dark1ltg/Meridian-lab`, then ask the agent to finish the mirror.
+Do **not** keep experimenting inside the Meridian workspace. This agent session is bound to Meridian and cannot switch.
+
+- **Desktop:** `git clone https://github.com/dark1ltg/Meridian-lab.git` → Cursor → **Open Folder** on that clone (new window).
+- **Cloud Agent:** start a **new** agent with repository `dark1ltg/Meridian-lab`.
+
+Optional: after the mirror, re-add the experimental README banner and commit on Meridian-lab only.
