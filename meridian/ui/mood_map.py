@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from meridian.context import LENS_RADIUS_DEFAULT, LENS_RADIUS_MAX, LENS_RADIUS_MIN
-from meridian.queue_engine import RankedTrack
+from meridian.queue_engine import QUADRANT_TITLE, Quadrant, RankedTrack
 from meridian.ui.fonts import sans
 from meridian.features import CONFIDENCE_HIGH, CONFIDENCE_LOW
 from meridian.ui.palette import (
@@ -38,11 +38,21 @@ from meridian.ui.palette import (
     PIN_HEAD_RADIUS,
     PIN_RING_QCOLOR,
     PIN_RING_WIDTH,
+    PLAYLIST_QCOLOR,
     STAR_RADIUS,
     STAR_Z,
 )
 
-# Night sky. Stars are moonlight, not playlist neon; the matrix still carries quadrant color.
+# Night sky. Star hue is the matrix queue the lens is pulling that song into.
+
+
+def queue_star_color(quadrant: Quadrant, *, loved: bool, band: int) -> QColor:
+    """Playlist hue. Dimmer bands stay the same color so the queue is still readable."""
+    color = QColor(PLAYLIST_QCOLOR[quadrant])
+    if loved and band > 0:
+        color = color.lighter(118)
+    color.setAlpha((140, 205, 250)[band])
+    return color
 NIGHT_BG = QColor("#07010f")
 SKY_LINK_K = 3
 SKY_LINK_MIN = 14.0
@@ -147,17 +157,15 @@ class TrackStar(QGraphicsEllipseItem):
         else:
             band = "low"
 
+        band_n = {"low": 0, "mid": 1, "high": 2}[band]
+        color = queue_star_color(ranked.quadrant, loved=bool(ranked.track.loved), band=band_n)
+        if current:
+            color.setAlpha(255)
         if band == "low":
-            color = QColor(198, 188, 224)
             self.setOpacity(LOW_CONFIDENCE_OPACITY)
         elif band == "mid":
-            color = QColor(236, 230, 255)
             self.setOpacity(MID_CONFIDENCE_OPACITY)
-        elif ranked.track.loved:
-            color = QColor("#fff6e4")
-            self.setOpacity(1.0)
         else:
-            color = QColor("#f7f4ff")
             self.setOpacity(1.0)
         self.setBrush(QBrush(color))
 
@@ -225,12 +233,12 @@ class TrackStar(QGraphicsEllipseItem):
         self._label.setText(title)
         br = self._label.boundingRect()
         self._label.setPos(-br.width() / 2, r + (8 if pinned else 4))
+        label_ink = QColor(PLAYLIST_QCOLOR[ranked.quadrant])
         if band == "low":
-            self._label.setBrush(QBrush(QColor("#9AA8C0")))
-        elif band == "mid":
-            self._label.setBrush(QBrush(QColor("#c5cde0")))
-        else:
-            self._label.setBrush(QBrush(QColor("#ffffff" if current or pinned else "#dce3f4")))
+            label_ink = label_ink.darker(130)
+        elif current or pinned:
+            label_ink = label_ink.lighter(140)
+        self._label.setBrush(QBrush(label_ink))
 
     def set_lod(self, glow_a: float, label_on: bool) -> None:
         show_glow = glow_a > 0.02
@@ -503,6 +511,26 @@ class MoodMap(QGraphicsView):
             label.setZValue(2)
             label.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
             self._sky_chrome.append(label)
+        # Same key as the matrix: which queue the lens is pulling each star into.
+        legend_x = 52.0
+        legend_y = 48.0
+        font_l = sans(11, medium=True)
+        font_l.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.6)
+        for quadrant in (Quadrant.NOW, Quadrant.DEEP, Quadrant.FILL, Quadrant.SHELF):
+            ink = QBrush(PLAYLIST_QCOLOR[quadrant])
+            dot = self._scene.addEllipse(
+                legend_x, legend_y, 8, 8, QPen(Qt.PenStyle.NoPen), ink
+            )
+            dot.setZValue(8)
+            dot.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+            self._sky_chrome.append(dot)
+            name = self._scene.addSimpleText(QUADRANT_TITLE[quadrant], font_l)
+            name.setBrush(ink)
+            name.setPos(legend_x + 12, legend_y - 3)
+            name.setZValue(8)
+            name.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+            self._sky_chrome.append(name)
+            legend_x += 78
 
     def mood_to_pos(self, valence: float, energy: float) -> QPointF:
         return QPointF(40 + valence * 720, 560 - energy * 524)
@@ -650,7 +678,9 @@ class MoodMap(QGraphicsView):
             pos = self._positions[item.track.id]
             radius, color, bloom = self._night_star(item, density_mode)
             if bloom:
-                painter.setBrush(QBrush(QColor(226, 216, 255, bloom)))
+                glow = QColor(color)
+                glow.setAlpha(bloom)
+                painter.setBrush(QBrush(glow))
                 painter.drawEllipse(pos, radius * 3.4, radius * 3.4)
             painter.setBrush(QBrush(color))
             painter.drawEllipse(pos, radius, radius)
@@ -676,7 +706,7 @@ class MoodMap(QGraphicsView):
         self._field_sig = self._field_signature()
 
     def _night_star(self, item: RankedTrack, density: bool) -> tuple[float, QColor, int]:
-        """Scene-pixel radius, moonlight color, and bloom alpha for one baked star."""
+        """Scene-pixel radius, matrix color, and bloom alpha for one baked star."""
         mag = ((item.track.id * 2654435761) & 0xFFFF) / 65535.0
         if item.track.pinned:
             band = 2
@@ -688,28 +718,25 @@ class MoodMap(QGraphicsView):
                 band = 1
             else:
                 band = 0
+        color = queue_star_color(item.quadrant, loved=bool(item.track.loved), band=band)
         bloom = 0
         if item.track.id == self._current_id:
-            radius, alpha, bloom = 2.55, 255, 78
-            color = QColor(255, 252, 255, alpha)
+            radius, bloom = 2.7, 78
+            color.setAlpha(255)
         elif band == 0:
-            radius = 0.62 + mag * 0.42
-            color = QColor(186, 176, 214, 78 + int(mag * 64))
+            radius = 1.05 + mag * 0.35
         elif band == 1:
-            radius = 0.8 + mag * 0.62
-            bloom = 24 if mag > 0.9 else 0
-            color = QColor(230, 224, 255, 150 + int(mag * 70))
+            radius = 1.25 + mag * 0.45
+            bloom = 28 if mag > 0.9 else 0
         else:
-            radius = 0.95 + mag * 0.85
+            radius = 1.4 + mag * 0.55
             if mag > 0.93:
-                radius = 2.15
-                bloom = 64
+                radius = 2.35
+                bloom = 70
             elif mag > 0.78:
-                bloom = 26
-            color = QColor(255, 250, 255, 205 + int(mag * 50))
+                bloom = 32
         if item.track.loved and item.track.id != self._current_id:
             radius += 0.28
-            color = QColor(255, 246, 228, color.alpha())
         if item.track.pinned and item.track.id != self._current_id:
             radius += 0.2
             bloom = max(bloom, 34)
