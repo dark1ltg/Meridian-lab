@@ -3,8 +3,9 @@
 > This repository (`dark1ltg/Meridian-lab`) is a scratch space for Meridian ideas.
 > Expect breakage, rewrites, and abandoned experiments.
 >
-> **Stable releases and the supported product live in [`dark1ltg/Meridian`](https://github.com/dark1ltg/Meridian).**
-> Do not treat lab commits as release-ready. Open bugs and PRs against Meridian only when you intend them for the stable project.
+> **Open this repo as its own Cursor workspace / Cloud Agent project.** Do not use the Meridian workspace for lab work.
+>
+> **Stable releases live in [`dark1ltg/Meridian`](https://github.com/dark1ltg/Meridian).**
 
 # Meridian-lab
 
