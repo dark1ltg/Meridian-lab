@@ -206,8 +206,8 @@ QListWidget::item:selected {
 QListWidget::item:hover { background: #1a243c; }
 QSplitter::handle { background: #0b1020; width: 18px; height: 18px; }
 QFrame#queuePanel {
-    background: #121a2e;
-    border: 1px solid #243049;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #160b28, stop:1 #0c0616);
+    border: 1px solid #2a2044;
     border-radius: 10px;
 }
 QStatusBar {

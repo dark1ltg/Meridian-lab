@@ -45,8 +45,8 @@ from meridian.ui.palette import (
     STAR_Z,
 )
 
-# Night sky. Sure stars use the matrix queue hue. A weak guess stays pewter,
-# with only a little of that hue, so trust and playlist can both be read.
+# Night sky. The field is quiet: white, or pewter for a weak guess.
+# Playlist color is only for stars inside the lens.
 LOVED_RING_QCOLOR = QColor("#fff4c2")
 # Readable at fit-to-widget, still smaller than the old ~6px playlist coin.
 STAR_BODY_SCALE = 0.50
@@ -58,8 +58,19 @@ def _star_mag(track_id: int) -> float:
     return ((track_id * 2654435761) & 0xFFFF) / 65535.0
 
 
+def quiet_star_color(band: int) -> QColor:
+    """Library star outside the lens. Trust is white versus pewter, not a queue hue."""
+    if band <= 0:
+        color = QColor(LOW_TRUST_QCOLOR)
+        color.setAlpha(170)
+        return color
+    if band == 1:
+        return QColor(214, 216, 228, 200)
+    return QColor(236, 238, 246, 230)
+
+
 def queue_star_color(quadrant: Quadrant, *, loved: bool, band: int) -> QColor:
-    """Playlist hue for a sure star. Low trust leans pewter so it is not just a dim neon."""
+    """Playlist hue for a star inside the lens. Low trust leans pewter."""
     playlist = QColor(PLAYLIST_QCOLOR[quadrant])
     if band <= 0:
         pewter = QColor(LOW_TRUST_QCOLOR)
@@ -193,8 +204,10 @@ VIEW_NATIVE_OUTLIER = 1.25
 LIVE_STARS_ZOOM = 2.4
 LOD_LABEL_START = 2.6
 LOD_GLOW_START = 2.4
-LOD_CHROME_FADE_START = 1.4
-LOD_CHROME_FADE_END = 4.0
+# Wide-sky furniture (weather, cross, axis labels, constellations) is gone
+# once live stars and their names take over.
+LOD_CHROME_FADE_START = 1.15
+LOD_CHROME_FADE_END = LIVE_STARS_ZOOM
 CLUSTER_PULL = 0.42
 CLUSTER_GRID = 48.0
 LOD_DEFER_MS = 48
@@ -248,6 +261,12 @@ class TrackStar(QGraphicsEllipseItem):
         self._label.setBrush(QBrush(QColor("#e8ecf7")))
         self._label.setFont(sans(10))
         self._label.hide()
+        self._role = QGraphicsSimpleTextItem(self)
+        self._role.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+        self._role.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
+        self._role.setZValue(31)
+        self._role.setFont(sans(8, medium=True))
+        self._role.hide()
         self._lod_key = (-1, False, False)
 
         self.apply_style(ranked, current=False)
@@ -284,7 +303,12 @@ class TrackStar(QGraphicsEllipseItem):
             density=False,
         )
         self.setRect(-r, -r, r * 2, r * 2)
-        color = queue_star_color(ranked.quadrant, loved=bool(ranked.track.loved), band=band_n)
+        inside = self._inside_lens(ranked)
+        color = (
+            queue_star_color(ranked.quadrant, loved=bool(ranked.track.loved), band=band_n)
+            if inside
+            else quiet_star_color(band_n)
+        )
         if current:
             color.setAlpha(255)
         # Pewter is the trust signal. A light opacity ease keeps a weak guess quieter
@@ -361,14 +385,31 @@ class TrackStar(QGraphicsEllipseItem):
         if len(title) > 28:
             title = title[:27] + "…"
         self._label.setText(title)
+        role = QUADRANT_TITLE[ranked.quadrant]
+        self._role.setText(role)
+        role_box = self._role.boundingRect()
+        self._role.setPos(-role_box.width() / 2, r + (8 if pinned else 3))
+        role_ink = QColor(PLAYLIST_QCOLOR[ranked.quadrant])
+        self._role.setBrush(QBrush(role_ink))
         br = self._label.boundingRect()
-        self._label.setPos(-br.width() / 2, r + (8 if pinned else 4))
-        label_ink = QColor(PLAYLIST_QCOLOR[ranked.quadrant])
-        if band == "low":
+        self._label.setPos(-br.width() / 2, r + role_box.height() + (6 if pinned else 2))
+        if inside:
+            label_ink = QColor(PLAYLIST_QCOLOR[ranked.quadrant])
+            if current or pinned:
+                label_ink = label_ink.lighter(140)
+        elif band == "low":
             label_ink = QColor("#9AA8C0")
-        elif current or pinned:
-            label_ink = label_ink.lighter(140)
+        else:
+            label_ink = QColor("#e8ecf7")
         self._label.setBrush(QBrush(label_ink))
+
+    def _inside_lens(self, ranked: RankedTrack) -> bool:
+        if self._map is None:
+            return False
+        pos = self._map._positions.get(ranked.track.id)
+        if pos is None:
+            return False
+        return self._map.star_in_lens(pos)
 
     def set_lod(self, glow_a: float, label_on: bool) -> None:
         show_glow = glow_a > 0.02
@@ -383,8 +424,10 @@ class TrackStar(QGraphicsEllipseItem):
             self._glow.hide()
         if label_on:
             self._label.show()
+            self._role.show()
         else:
             self._label.hide()
+            self._role.hide()
 
     def hoverEnterEvent(self, event) -> None:
         self.setScale(1.45)
@@ -548,11 +591,27 @@ class MoodMap(QGraphicsView):
         self._lod_timer.timeout.connect(self._flush_zoom_lod)
         self._sky_bg = None
         self._draw_backdrop()
+        self._links = QGraphicsPixmapItem()
+        self._links.setZValue(4)
+        self._links.setShapeMode(QGraphicsPixmapItem.ShapeMode.BoundingRectShape)
+        self._links.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self._scene.addItem(self._links)
         self._field = QGraphicsPixmapItem()
         self._field.setZValue(5)
         self._field.setShapeMode(QGraphicsPixmapItem.ShapeMode.BoundingRectShape)
         self._field.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         self._scene.addItem(self._field)
+        self._route = QGraphicsPixmapItem()
+        self._route.setZValue(5.3)
+        self._route.setShapeMode(QGraphicsPixmapItem.ShapeMode.BoundingRectShape)
+        self._route.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self._scene.addItem(self._route)
+        self._lens_color = QGraphicsPixmapItem()
+        self._lens_color.setZValue(5.6)
+        self._lens_color.setShapeMode(QGraphicsPixmapItem.ShapeMode.BoundingRectShape)
+        self._lens_color.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self._scene.addItem(self._lens_color)
+        self._queue_order: list[int] = []
         self.lens = LensItem()
         self._scene.addItem(self.lens)
         self.lens.setPos(420, 300)
@@ -610,7 +669,7 @@ class MoodMap(QGraphicsView):
         self._gpu_enabled = False
 
     def _draw_backdrop(self) -> None:
-        """Violet night sky, with the Shadow/Glow and Still/Kinetic segments."""
+        """Violet night sky. Corners carry the mood weather; the cross is the only seam."""
         for item in self._sky_chrome:
             self._scene.removeItem(item)
         self._sky_chrome.clear()
@@ -629,9 +688,32 @@ class MoodMap(QGraphicsView):
         item.setZValue(0)
         item.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         self._sky_bg = item
-        # Quarter marks stay quiet. The middle cross is the Shadow|Glow and Still|Kinetic split.
-        quarter = QPen(QColor(206, 196, 230, 72), 1.0)
-        quarter.setCosmetic(True)
+
+        def add_weather(cx: float, cy: float, radius: float, color: QColor) -> None:
+            grad = QRadialGradient(cx, cy, radius)
+            grad.setColorAt(0.0, color)
+            edge = QColor(color)
+            edge.setAlpha(0)
+            grad.setColorAt(1.0, edge)
+            pool = self._scene.addEllipse(
+                cx - radius,
+                cy - radius,
+                radius * 2,
+                radius * 2,
+                QPen(Qt.PenStyle.NoPen),
+                QBrush(grad),
+            )
+            pool.setZValue(0.4)
+            pool.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+            self._sky_chrome.append(pool)
+
+        # Shadow/Still is the cold corner. Glow/Kinetic is the warm horizon.
+        add_weather(130, 500, 280, QColor(64, 108, 168, 82))
+        add_weather(690, 100, 300, QColor(206, 124, 62, 74))
+        add_weather(140, 110, 220, QColor(46, 28, 96, 58))
+        add_weather(670, 500, 240, QColor(128, 64, 96, 50))
+
+        # The middle cross is the Shadow|Glow and Still|Kinetic split.
         cross_glow = QPen(QColor(220, 214, 240, 80), 6.0)
         cross_glow.setCosmetic(True)
         cross_glow.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -645,21 +727,16 @@ class MoodMap(QGraphicsView):
             guide.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
             self._sky_chrome.append(guide)
 
-        for i in range(1, 4):
-            y = 36 + 524 * i / 4
-            x = 40 + 720 * i / 4
-            if i == 2:
-                add_guide(40, y, 760, y, cross_glow)
-                add_guide(x, 36, x, 560, cross_glow)
-                add_guide(40, y, 760, y, cross)
-                add_guide(x, 36, x, 560, cross)
-            else:
-                add_guide(40, y, 760, y, quarter)
-                add_guide(x, 36, x, 560, quarter)
-        font = sans(11)
-        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.0)
-        ink = QBrush(QColor(201, 192, 224))
-        for x, y, text in ((400, 22, "KINETIC  ↑"), (400, 582, "STILL  ↓")):
+        y = 36 + 524 * 2 / 4
+        x = 40 + 720 * 2 / 4
+        add_guide(40, y, 760, y, cross_glow)
+        add_guide(x, 36, x, 560, cross_glow)
+        add_guide(40, y, 760, y, cross)
+        add_guide(x, 36, x, 560, cross)
+        font = sans(9)
+        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.8)
+        ink = QBrush(QColor(201, 192, 224, 150))
+        for x, y, text in ((400, 18, "KINETIC  ↑"), (400, 584, "STILL  ↓")):
             label = self._scene.addSimpleText(text, font)
             label.setBrush(ink)
             label.setPos(x - label.boundingRect().width() / 2, y - 8)
@@ -676,26 +753,6 @@ class MoodMap(QGraphicsView):
             label.setZValue(2)
             label.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
             self._sky_chrome.append(label)
-        # Same key as the matrix: which queue the lens is pulling each star into.
-        legend_x = 52.0
-        legend_y = 48.0
-        font_l = sans(11, medium=True)
-        font_l.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.6)
-        for quadrant in (Quadrant.NOW, Quadrant.DEEP, Quadrant.FILL, Quadrant.SHELF):
-            ink = QBrush(PLAYLIST_QCOLOR[quadrant])
-            dot = self._scene.addEllipse(
-                legend_x, legend_y, 8, 8, QPen(Qt.PenStyle.NoPen), ink
-            )
-            dot.setZValue(8)
-            dot.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
-            self._sky_chrome.append(dot)
-            name = self._scene.addSimpleText(QUADRANT_TITLE[quadrant], font_l)
-            name.setBrush(ink)
-            name.setPos(legend_x + 12, legend_y - 3)
-            name.setZValue(8)
-            name.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
-            self._sky_chrome.append(name)
-            legend_x += 78
 
     def mood_to_pos(self, valence: float, energy: float) -> QPointF:
         return QPointF(40 + valence * 720, 560 - energy * 524)
@@ -741,6 +798,8 @@ class MoodMap(QGraphicsView):
         if sig != self._field_sig:
             self._field_sig = sig
             self._rebuild_starfield()
+        self._refresh_lens_colors()
+        self._refresh_route()
         self._lod_band = -1
         self._sync_live_stars(force=True)
 
@@ -756,7 +815,6 @@ class MoodMap(QGraphicsView):
                     tid,
                     round(p.x(), 1),
                     round(p.y(), 1),
-                    r.quadrant.value,
                     bool(r.track.loved),
                     bool(r.track.pinned),
                     round(conf, 2),
@@ -828,10 +886,6 @@ class MoodMap(QGraphicsView):
                     radius,
                     radius,
                 )
-        painter.save()
-        painter.resetTransform()
-        painter.drawImage(0, 0, self._baked_link_image())
-        painter.restore()
         painter.setPen(Qt.PenStyle.NoPen)
         for item in order:
             pos = self._positions[item.track.id]
@@ -869,10 +923,14 @@ class MoodMap(QGraphicsView):
         self._field.setScale(1.0 / FIELD_SCALE)
         self._field.setPos(0, 0)
         self._field.setVisible(True)
+        links = QPixmap.fromImage(self._baked_link_image())
+        self._links.setPixmap(links)
+        self._links.setScale(1.0 / FIELD_SCALE)
+        self._links.setPos(0, 0)
         self._field_sig = self._field_signature()
 
     def _night_star(self, item: RankedTrack, density: bool) -> tuple[float, QColor, int]:
-        """Scene-pixel radius, matrix color, and bloom alpha for one baked star."""
+        """Scene-pixel radius, quiet-sky color, and bloom alpha for one baked star."""
         mag = _star_mag(item.track.id)
         if item.track.pinned or item.track.id == self._current_id:
             band = 2
@@ -884,7 +942,7 @@ class MoodMap(QGraphicsView):
                 band = 1
             else:
                 band = 0
-        color = queue_star_color(item.quadrant, loved=bool(item.track.loved), band=band)
+        color = quiet_star_color(band)
         if item.track.id == self._current_id:
             color.setAlpha(255)
         radius = night_body_radius(
@@ -974,6 +1032,126 @@ class MoodMap(QGraphicsView):
                         best_id = tid
         return best_id
 
+    def star_in_lens(self, pos: QPointF) -> bool:
+        center = self.lens.pos()
+        rect = self.lens.rect()
+        rx = max(1.0, rect.width() * 0.5)
+        ry = max(1.0, rect.height() * 0.5)
+        dx = (pos.x() - center.x()) / rx
+        dy = (pos.y() - center.y()) / ry
+        return dx * dx + dy * dy <= 1.0
+
+    def set_queue_route(self, order: list[int]) -> None:
+        """Committed context queue, in play order. The path redraws from these ids."""
+        self._queue_order = [int(tid) for tid in order]
+        self._refresh_route()
+
+    def _confidence_band(self, item: RankedTrack) -> int:
+        if item.track.pinned or item.track.id == self._current_id:
+            return 2
+        conf = float(getattr(item.track, "mood_confidence", 0.5) or 0.5)
+        if conf >= CONFIDENCE_HIGH:
+            return 2
+        if conf >= CONFIDENCE_LOW:
+            return 1
+        return 0
+
+    def _refresh_lens_colors(self) -> None:
+        """Playlist color only for stars the lens is covering."""
+        if not self._ranked or not self._positions:
+            self._lens_color.setPixmap(QPixmap())
+            return
+        center = self.lens.pos()
+        rect = self.lens.rect()
+        rx = rect.width() * 0.5
+        ry = rect.height() * 0.5
+        pad = 10.0
+        x0 = max(0.0, center.x() - rx - pad)
+        y0 = max(0.0, center.y() - ry - pad)
+        x1 = min(float(SCENE_W), center.x() + rx + pad)
+        y1 = min(float(SCENE_H), center.y() + ry + pad)
+        width = max(1, int(round((x1 - x0) * FIELD_SCALE)))
+        height = max(1, int(round((y1 - y0) * FIELD_SCALE)))
+        image = QImage(width, height, QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.scale(FIELD_SCALE, FIELD_SCALE)
+        painter.translate(-x0, -y0)
+        density = len(self._ranked) > 1200
+        painter.setPen(Qt.PenStyle.NoPen)
+        for item in self._ranked.values():
+            pos = self._positions.get(item.track.id)
+            if pos is None or not self.star_in_lens(pos):
+                continue
+            radius, _quiet, bloom = self._night_star(item, density)
+            band = self._confidence_band(item)
+            color = queue_star_color(item.quadrant, loved=bool(item.track.loved), band=band)
+            if item.track.id == self._current_id:
+                color.setAlpha(255)
+            if bloom:
+                glow = QColor(color)
+                glow.setAlpha(min(110, bloom + 20))
+                painter.setBrush(QBrush(glow))
+                painter.drawEllipse(pos, radius * 3.2, radius * 3.2)
+            painter.setBrush(QBrush(color))
+            painter.drawEllipse(pos, radius, radius)
+            if item.track.loved and not item.track.pinned and item.track.id != self._current_id:
+                ring = QPen(LOVED_RING_QCOLOR, 1.2)
+                painter.setPen(ring)
+                painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+                painter.drawEllipse(pos, radius + 1.35, radius + 1.35)
+                painter.setPen(Qt.PenStyle.NoPen)
+        painter.end()
+        self._lens_color.setPixmap(QPixmap.fromImage(image))
+        self._lens_color.setScale(1.0 / FIELD_SCALE)
+        self._lens_color.setPos(x0, y0)
+
+    def _refresh_route(self) -> None:
+        """Open path through the committed queue. Brightest on the song that is playing."""
+        points: list[tuple[int, QPointF]] = []
+        for tid in self._queue_order:
+            pos = self._positions.get(tid)
+            if pos is not None:
+                points.append((tid, pos))
+        if len(points) < 2:
+            self._route.setPixmap(QPixmap())
+            return
+        image = QImage(
+            SCENE_W * FIELD_SCALE,
+            SCENE_H * FIELD_SCALE,
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.scale(FIELD_SCALE, FIELD_SCALE)
+        current_index = 0
+        for index, (tid, _pos) in enumerate(points):
+            if tid == self._current_id:
+                current_index = index
+                break
+        for index in range(len(points) - 1):
+            hop = min(abs(index - current_index), abs(index + 1 - current_index))
+            if hop == 0:
+                color = QColor(255, 246, 214, 230)
+                width = 2.5
+                soft = QPen(QColor(255, 236, 180, 80), 6.0)
+                soft.setCapStyle(Qt.PenCapStyle.RoundCap)
+                painter.setPen(soft)
+                painter.drawLine(points[index][1], points[index + 1][1])
+            else:
+                color = QColor(214, 206, 232, max(64, 170 - hop * 26))
+                width = 1.35
+            pen = QPen(color, width)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            painter.drawLine(points[index][1], points[index + 1][1])
+        painter.end()
+        self._route.setPixmap(QPixmap.fromImage(image))
+        self._route.setScale(1.0 / FIELD_SCALE)
+        self._route.setPos(0, 0)
+
     def lens_mood(self) -> tuple[float, float, float]:
         vx, ey = self.pos_to_mood(self.lens.pos())
         return vx, ey, self._radius
@@ -1006,6 +1184,10 @@ class MoodMap(QGraphicsView):
         self.set_lens(track.valence, track.energy, self._radius)
 
     def lens_moved(self) -> None:
+        self._refresh_lens_colors()
+        if self._user_zoom >= LIVE_STARS_ZOOM:
+            self._lod_band = -1
+            self._sync_live_stars(force=True)
         x, y, r = self.lens_mood()
         self.lens_changed.emit(x, y, r)
 
@@ -1014,6 +1196,8 @@ class MoodMap(QGraphicsView):
         self._positions[star.ranked.track.id] = QPointF(star.pos())
         self._rebuild_star_grid()
         self._rebuild_starfield()
+        self._refresh_lens_colors()
+        self._refresh_route()
         self.track_pinned.emit(star.ranked.track.id, v, e)
 
     def _update_drag_position(self, tid: int, pos: QPointF) -> None:
@@ -1069,12 +1253,13 @@ class MoodMap(QGraphicsView):
         if zoom <= LOD_CHROME_FADE_START:
             chrome = 1.0
         elif zoom >= LOD_CHROME_FADE_END:
-            chrome = 0.08
+            chrome = 0.0
         else:
             t = (zoom - LOD_CHROME_FADE_START) / (LOD_CHROME_FADE_END - LOD_CHROME_FADE_START)
-            chrome = 1.0 - 0.92 * t
+            chrome = 1.0 - t
         for item in self._sky_chrome:
             item.setOpacity(chrome)
+        self._links.setOpacity(chrome)
 
     def _ensure_interactive_star(self, tid: int) -> TrackStar | None:
         """Materialize one movable star (used for sky-mode click/drag)."""
@@ -1114,10 +1299,14 @@ class MoodMap(QGraphicsView):
                 else:
                     star.hide()
             self._field.setOpacity(1.0)
+            self._lens_color.setOpacity(1.0)
+            self._route.setOpacity(1.0)
             return
 
         # Fade the baked field slightly so live bodies read clearly.
         self._field.setOpacity(0.35)
+        self._lens_color.setOpacity(0.22)
+        self._route.setOpacity(0.85)
         vis = self.mapToScene(self.viewport().rect()).boundingRect()
         vis.adjust(-60, -60, 60, 60)
         locked = self._drag_locked_ids()

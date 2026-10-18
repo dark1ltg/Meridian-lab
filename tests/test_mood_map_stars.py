@@ -15,7 +15,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QApplication, QGraphicsLineItem
+from PySide6.QtWidgets import QApplication, QGraphicsEllipseItem, QGraphicsLineItem
 
 from meridian.library import Track
 from meridian.queue_engine import Quadrant, RankedTrack
@@ -29,6 +29,7 @@ from meridian.ui.mood_map import (
     constellation_segments,
     night_body_radius,
     queue_star_color,
+    quiet_star_color,
 )
 from meridian.ui.palette import LOW_TRUST_QCOLOR, PLAYLIST_QCOLOR
 
@@ -203,7 +204,7 @@ def test_recolor_reuses_links_and_a_large_map_stays_quick(qapp, monkeypatch) -> 
         for item in first
     ]
     mood.set_tracks(recolored, None)
-    assert rebuilds["n"] == 2
+    assert rebuilds["n"] == 1
     assert calls["n"] == 1
 
     rng = random.Random(0)
@@ -228,11 +229,83 @@ def test_recolor_reuses_links_and_a_large_map_stays_quick(qapp, monkeypatch) -> 
     assert time.perf_counter() - started < 0.15
 
 
-def test_mood_cross_reads_stronger_than_the_quarter_marks(qapp) -> None:
+def test_mood_cross_is_the_only_seam(qapp) -> None:
     mood = MoodMap()
     lines = [item for item in mood._sky_chrome if isinstance(item, QGraphicsLineItem)]
     center = [item for item in lines if abs(item.line().y1() - 298) < 1 and abs(item.line().x2() - 760) < 1]
     quarter = [item for item in lines if abs(item.line().y1() - (36 + 524 / 4)) < 1]
-    assert center and quarter
+    weather = [item for item in mood._sky_chrome if isinstance(item, QGraphicsEllipseItem)]
+    assert center
+    assert not quarter
+    assert len(weather) >= 4
     assert max(item.pen().color().alpha() for item in center) >= 160
-    assert max(item.pen().color().alpha() for item in center) > quarter[0].pen().color().alpha()
+
+
+def test_lens_colors_only_the_stars_it_covers(qapp) -> None:
+    mood = MoodMap()
+    mood.resize(800, 600)
+    valence = (420 - 40) / 720
+    energy = (560 - 300) / 524
+    inside = _ranked(_track(1, valence=valence, energy=energy, mood_confidence=0.95), Quadrant.NOW)
+    outside = _ranked(_track(2, valence=0.05, energy=0.05, mood_confidence=0.95), Quadrant.NOW)
+    mood.set_tracks([inside, outside], None)
+    quiet = quiet_star_color(2)
+    baked = mood._night_star(mood._ranked[1], False)[1]
+    assert _dist(baked, quiet) < _dist(baked, PLAYLIST_QCOLOR[Quadrant.NOW])
+    assert mood.star_in_lens(mood._positions[1])
+    assert not mood.star_in_lens(mood._positions[2])
+    tint = mood._lens_color.pixmap().toImage()
+    pos = mood._positions[1]
+    origin = mood._lens_color.pos()
+    amber = 0
+    for dy in range(-8, 9):
+        for dx in range(-8, 9):
+            x = int(round((pos.x() - origin.x()) * 2)) + dx
+            y = int(round((pos.y() - origin.y()) * 2)) + dy
+            if not (0 <= x < tint.width() and 0 <= y < tint.height()):
+                continue
+            color = tint.pixelColor(x, y)
+            if color.red() > 180 and color.green() > 120 and color.blue() < 90 and color.alpha() > 40:
+                amber += 1
+    assert amber >= 4
+
+
+def test_queue_route_is_brightest_beside_the_current_song(qapp) -> None:
+    mood = MoodMap()
+    mood.set_tracks(
+        [
+            _ranked(_track(1, valence=0.30, energy=0.40)),
+            _ranked(_track(2, valence=0.60, energy=0.70)),
+            _ranked(_track(3, valence=0.80, energy=0.30)),
+        ],
+        current_id=1,
+    )
+    mood.set_queue_route([1, 2, 3])
+    image = mood._route.pixmap().toImage()
+    assert not image.isNull()
+
+    def peak(a, b) -> int:
+        sx = (a.x() + b.x()) * 0.5
+        sy = (a.y() + b.y()) * 0.5
+        best = 0
+        for dy in range(-10, 11):
+            for dx in range(-10, 11):
+                x = int(round(sx * 2)) + dx
+                y = int(round(sy * 2)) + dy
+                if 0 <= x < image.width() and 0 <= y < image.height():
+                    best = max(best, image.pixelColor(x, y).alpha())
+        return best
+
+    first = mood._positions[1]
+    second = mood._positions[2]
+    third = mood._positions[3]
+    assert peak(first, second) > peak(second, third)
+
+
+def test_zoomed_star_can_show_a_role_chip(qapp) -> None:
+    star = TrackStar(_ranked(_track(9, mood_confidence=0.95), Quadrant.DEEP))
+    assert not star._role.isVisible()
+    star.set_lod(1.0, True)
+    assert star._label.isVisible()
+    assert star._role.isVisible()
+    assert star._role.text() == "DEEP"

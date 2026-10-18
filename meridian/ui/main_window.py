@@ -53,10 +53,16 @@ from meridian.scanner import (
     start_worker,
 )
 from meridian.ui.search import TrackSearch
-from meridian.ui.fit_list import FitList
 from meridian.ui.fonts import condensed
 from meridian.ui.palette import PLAYLIST_HEX
-from meridian.ui.matrix import EisenhowerMatrix
+from meridian.ui.matrix import (
+    STAR_COLOR_ROLE,
+    STAR_CURRENT_ROLE,
+    STAR_LINK_ROLE,
+    STAR_LOVED_ROLE,
+    EisenhowerMatrix,
+    StarList,
+)
 from meridian.ui.mood_map import MoodMap
 from meridian.ui.transport import TransportBar
 
@@ -364,7 +370,7 @@ class MainWindow(QMainWindow):
         renew_btn.clicked.connect(self._renew_queue)
         q_head_row.addWidget(q_head, 1)
         q_head_row.addWidget(renew_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.queue_list = FitList()
+        self.queue_list = StarList()
         self.queue_list.setObjectName("queueList")
         self.queue_list.setFont(condensed(12))
         q_l.addLayout(q_head_row)
@@ -571,6 +577,7 @@ class MainWindow(QMainWindow):
 
     def _fill_queue(self) -> None:
         self.queue_list.clear()
+        self.map.set_queue_route(list(self.session_queue))
         if not self.session_queue:
             return
         by_id = {r.track.id: r for r in self.plan.ranked} if self.plan else {}
@@ -585,6 +592,10 @@ class MainWindow(QMainWindow):
             tip = self._queue_reason(track, ranked, tid in self.ephemeral)
             if ranked:
                 item.setForeground(QColor(PLAYLIST_HEX[ranked.quadrant]))
+                item.setData(STAR_COLOR_ROLE, PLAYLIST_HEX[ranked.quadrant])
+                item.setData(STAR_LOVED_ROLE, bool(track.loved))
+            item.setData(STAR_LINK_ROLE, True)
+            item.setData(STAR_CURRENT_ROLE, i == self.queue_index)
             item.setToolTip(tip)
             if i == self.queue_index:
                 item.setSelected(True)
