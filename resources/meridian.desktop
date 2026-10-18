@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Meridian
+GenericName=Music Player
+Comment=Offline mood-map music player with a context-aware listen queue
+Exec=Meridian
+Icon=meridian
+Terminal=false
+StartupNotify=true
+StartupWMClass=Meridian
+Categories=AudioVideo;Audio;Player;
+Keywords=music;audio;player;mood;map;queue;library;playlist;
+X-AppImage-Version=1.3.6
+X-AppImage-Name=Meridian
