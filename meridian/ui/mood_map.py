@@ -6,6 +6,7 @@ from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
+    QFont,
     QImage,
     QMouseEvent,
     QNativeGestureEvent,
@@ -449,7 +450,7 @@ class MoodMap(QGraphicsView):
         self._gpu_enabled = False
 
     def _draw_backdrop(self) -> None:
-        """Full-bleed violet night. Axis labels and the playlist legend live off the sky."""
+        """Violet night sky, with Shadow/Glow and Still/Kinetic along the edges."""
         for item in self._sky_chrome:
             self._scene.removeItem(item)
         self._sky_chrome.clear()
@@ -468,6 +469,26 @@ class MoodMap(QGraphicsView):
         item.setZValue(0)
         item.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         self._sky_bg = item
+        font = sans(11)
+        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.0)
+        ink = QBrush(QColor(201, 192, 224))
+        for x, y, text in ((400, 22, "KINETIC  ↑"), (400, 582, "STILL  ↓")):
+            label = self._scene.addSimpleText(text, font)
+            label.setBrush(ink)
+            label.setPos(x - label.boundingRect().width() / 2, y - 8)
+            label.setZValue(2)
+            label.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+            self._sky_chrome.append(label)
+        for x, y, text, angle in ((16, 298, "SHADOW", -90), (784, 298, "GLOW", 90)):
+            label = self._scene.addSimpleText(text, font)
+            label.setBrush(ink)
+            bounds = label.boundingRect()
+            label.setTransformOriginPoint(bounds.center())
+            label.setRotation(angle)
+            label.setPos(x - bounds.width() / 2, y - bounds.height() / 2)
+            label.setZValue(2)
+            label.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+            self._sky_chrome.append(label)
 
     def mood_to_pos(self, valence: float, energy: float) -> QPointF:
         return QPointF(40 + valence * 720, 560 - energy * 524)
