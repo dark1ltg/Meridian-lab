@@ -1,13 +1,13 @@
-> **Experimental playground — not the stable Meridian release line.**
->
-> This repository (`dark1ltg/Meridian-lab`) is a scratch space for Meridian ideas.
-> Expect breakage, rewrites, and abandoned experiments.
->
-> **Stable releases and the supported product live in [`dark1ltg/Meridian`](https://github.com/dark1ltg/Meridian).**
-> Do not treat lab commits as release-ready. Open bugs and PRs against Meridian only when you intend them for the stable project.
+# Meridian Lab
 
-# Meridian-lab
+**Experimental playground** — separate from the stable [Meridian](https://github.com/dark1ltg/Meridian) project.
 
-Forked from Meridian for isolated experimentation. Same local, offline Linux music-player codebase; different project purpose.
+This repo exists so ideas, prototypes, and risky changes can live here without polluting Meridian releases.
 
-See the stable project: [dark1ltg/Meridian](https://github.com/dark1ltg/Meridian).
+- Upstream / stable: https://github.com/dark1ltg/Meridian
+- Expect breakage, rewrites, and unfinished experiments
+- Do not ship AppImage releases from this repo unless intentionally graduating a change back upstream
+
+## Status
+
+Initial seed. Full Meridian tree will be imported next (or push from a machine with write access).
