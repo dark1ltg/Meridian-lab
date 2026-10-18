@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("MERIDIAN_NO_GL", "1")
 
 
 def test_genre_seed_path_jitter_distinct_coords() -> None:

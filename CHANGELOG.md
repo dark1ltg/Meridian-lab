@@ -26,6 +26,7 @@ Version stays **1.3.6**. This refresh makes the short listen more honest and the
 - Finding audio after a silent head is a normal listen, not a “weak listen” tax; partial multi-window listens can’t claim full steer weight.
 - Skimpy re-analyze keeps a prior shape note; seed-only rows don’t get fake high steer; near-floor hiss stays quiet on Glow.
 - Dialogue / slope / pitch-Glow / keyword-undo / dual-window honesty gates fixed so the honesty pack actually fires on real audio.
+- Mood map uses an OpenGL viewport by default. A helper process checks the driver first; if that check fails, the map stays on the software widget. `MERIDIAN_NO_GL=1`, `MERIDIAN_GL=off`, `QT_OPENGL=software`, or `LIBGL_ALWAYS_SOFTWARE=1` keep software.
 
 ### What’s new (plain English)
 

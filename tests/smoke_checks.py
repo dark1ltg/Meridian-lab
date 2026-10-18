@@ -885,6 +885,10 @@ def check_mood_map_helpers() -> None:
     from meridian.context import LENS_RADIUS_DEFAULT
     from meridian.queue_engine import Quadrant
     from types import SimpleNamespace
+    import os
+
+    # Keep this helper on the software widget even when hardware GL is the default.
+    os.environ["MERIDIAN_NO_GL"] = "1"
 
     m = MoodMap()
     assert hasattr(m, "_ensure_interactive_star")
@@ -894,7 +898,7 @@ def check_mood_map_helpers() -> None:
     assert hasattr(m, "set_radius_scale")
     assert hasattr(m, "_field_signature")
     assert hasattr(m, "_track_star_from_item")
-    # Default / test env: no OpenGL viewport (avoids EGL abort + teardown crashes).
+    # Software viewport in this helper (MERIDIAN_NO_GL), so teardown stays off the GPU.
     assert m._gpu_enabled is False
     m.release_gpu_viewport()
     assert m._gpu_enabled is False

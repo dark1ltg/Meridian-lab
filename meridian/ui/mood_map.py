@@ -428,17 +428,18 @@ class MoodMap(QGraphicsView):
     def _enable_opengl_viewport(self) -> bool:
         import os
 
-        # Opt-in only: QOpenGLWidget construction can native-abort on broken EGL.
-        # MERIDIAN_NO_GL=1 (default unless MERIDIAN_GL is set) keeps a plain viewport.
-        if os.environ.get("MERIDIAN_NO_GL", "").strip().lower() in {"1", "true", "yes"}:
-            return False
-        gl_mode = os.environ.get("MERIDIAN_GL", "").strip().lower()
-        if gl_mode not in {"1", "true", "yes", "on", "gpu", "desktop", "force"}:
+        from meridian.gl_viewport import ensure_hardware_gl
+
+        # Default is hardware. ensure_hardware_gl probes in a child process and
+        # sets MERIDIAN_NO_GL when the driver cannot create a context.
+        if not ensure_hardware_gl():
             return False
         try:
             from PySide6.QtGui import QSurfaceFormat
             from PySide6.QtOpenGLWidgets import QOpenGLWidget
         except ImportError:
+            os.environ["MERIDIAN_NO_GL"] = "1"
+            os.environ["MERIDIAN_GL_PROBE"] = "fail"
             return False
         try:
             gl = QOpenGLWidget(self)
@@ -456,6 +457,8 @@ class MoodMap(QGraphicsView):
             )
             return True
         except Exception:
+            os.environ["MERIDIAN_NO_GL"] = "1"
+            os.environ["MERIDIAN_GL_PROBE"] = "fail"
             return False
 
     def release_gpu_viewport(self) -> None:

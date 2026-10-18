@@ -42,20 +42,15 @@ The release AppImage needs **glibc 2.38+** (Ubuntu 24.04 ships **2.39**). Distro
 
 Also install host **`ffmpeg`** for mood analysis. For H.264 through Qt’s FFmpeg plugin, install system **`x264` / `libx264`** (not bundled). Meridian warns if that library is missing.
 
-On broken GPU/EGL setups (some VMs / missing Mesa), Meridian **does not** use an OpenGL mood-map viewport by default. The map runs on a normal software widget path. To opt into GPU acceleration when your drivers are healthy:
+The mood map uses an OpenGL viewport when the GPU driver can create one. Meridian checks that in a short helper process before the window opens. If the driver errors or the hardware check fails, the map stays on the software widget.
+
+To keep the software map:
 
 ```bash
-MERIDIAN_GL=1 ./Meridian-x86_64.AppImage
-# or force classic desktop OpenGL:
-MERIDIAN_GL=desktop ./Meridian-x86_64.AppImage
-```
-
-If a GPU build still fails to start, use:
-
-```bash
-LIBGL_ALWAYS_SOFTWARE=1 QT_OPENGL=software ./Meridian-x86_64.AppImage
-# or:
 MERIDIAN_NO_GL=1 ./Meridian-x86_64.AppImage
+# or:
+MERIDIAN_GL=off ./Meridian-x86_64.AppImage
+LIBGL_ALWAYS_SOFTWARE=1 QT_OPENGL=software ./Meridian-x86_64.AppImage
 ```
 
 ### AppImage (recommended)

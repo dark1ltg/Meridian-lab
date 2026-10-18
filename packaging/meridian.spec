@@ -48,6 +48,8 @@ hiddenimports += [
     "PySide6.QtNetwork",
     "PySide6.QtSvg",
     "PySide6.QtDBus",
+    "PySide6.QtOpenGL",
+    "PySide6.QtOpenGLWidgets",
     "shiboken6",
 ]
 
