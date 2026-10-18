@@ -1,0 +1,10 @@
+# Fallback for PyInstaller bootloader attribution.
+
+PyInstaller is licensed under the GPL-2.0-or-later with a special exception
+which allows the bootloader to be used with programs under other licences
+(including commercial ones). See:
+
+  https://github.com/pyinstaller/pyinstaller/blob/develop/COPYING.txt
+
+Meridian itself remains GPL-3.0. The bootloader exception does not relicense
+Meridian or GPL libraries such as mutagen.

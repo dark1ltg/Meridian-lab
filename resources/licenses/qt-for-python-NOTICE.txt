@@ -1,0 +1,23 @@
+Meridian AppImage — Qt for Python / PySide6 notice
+=================================================
+
+This AppImage may include PySide6, shiboken6, and Qt libraries obtained from
+the Qt for Python / Qt 6 distribution installed when the image was built.
+
+Qt for Python (PySide6 / shiboken6) and Qt 6 libraries are available under a
+choice of licences, including the GNU Lesser General Public License version 3
+and the GNU General Public License versions 2 or 3. See:
+
+  https://doc.qt.io/qtforpython-6/licenses.html
+
+Meridian treats the Qt libraries as separate components under LGPL-3.0
+(GPL-3.0 texts are also included). Full licence texts shipped with this
+AppImage:
+
+  third-party/qt6/LGPL-3.0-only.txt
+  third-party/qt6/GPL-3.0-only.txt
+  third-party/pyside6/LGPL-3.0-only.txt
+  third-party/pyside6/GPL-3.0-only.txt
+
+Do not select the GPL-2.0-only Qt option when combining with Meridian’s
+GPL-3.0-only code.

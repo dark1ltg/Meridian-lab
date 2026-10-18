@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# Fallback notice when the installed mutagen wheel does not ship a standalone
+# COPYING/LICENSE file next to the package. mutagen is GPL-2.0-or-later.
+# Full GPLv2 text: https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt
+#
+# The Meridian AppImage also includes Meridian under GPL-3.0; see
+# usr/share/doc/meridian/LICENSE.
+
+mutagen — GNU General Public License version 2 or later
+=======================================================
+
+This AppImage redistributes the mutagen library for audio metadata.
+
+Copyright (C) mutagen contributors
+License-Expression: GPL-2.0-or-later
+
+You may redistribute and/or modify mutagen under the terms of the GNU General
+Public License as published by the Free Software Foundation; either version 2
+of the License, or (at your option) any later version.
+
+A copy of GPL version 3 (which mutagen recipients may use via “or later”) is
+included with Meridian as LICENSE. The GPLv2 text is available from the Free
+Software Foundation at the URL above, and from the mutagen source distribution.
