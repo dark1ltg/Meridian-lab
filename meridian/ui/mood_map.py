@@ -300,22 +300,37 @@ class TrackStar(QGraphicsEllipseItem):
 class LensItem(QGraphicsEllipseItem):
     def __init__(self) -> None:
         super().__init__(-90, -90, 180, 180)
-        self.setBrush(QBrush(Qt.BrushStyle.NoBrush))
-        ring = QPen(QColor(247, 244, 255, 220), 1.25)
-        ring.setCosmetic(True)
-        ring.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        self.setPen(ring)
+        # Soft pool plus a wide glow, then a bright ring and a fixed center dot
+        # so the marker still reads when stars and links cross it.
+        self.setBrush(QBrush(QColor(232, 224, 255, 36)))
+        glow = QPen(QColor(214, 204, 245, 110), 9.0)
+        glow.setCosmetic(True)
+        glow.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        glow.setCapStyle(Qt.PenCapStyle.RoundCap)
+        self.setPen(glow)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
         # Below live stars (z≥7) so stars under the lens stay clickable / draggable.
         self.setZValue(6)
         self.setCursor(Qt.CursorShape.SizeAllCursor)
         self._map: MoodMap | None = None
-        # Kept so setRect stays in sync; a second stroke would double the ring.
+        ring = QPen(QColor(255, 252, 255, 255), 2.6)
+        ring.setCosmetic(True)
+        ring.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        ring.setCapStyle(Qt.PenCapStyle.RoundCap)
         self._halo = QGraphicsEllipseItem(-90, -90, 180, 180, self)
-        self._halo.setPen(QPen(Qt.PenStyle.NoPen))
+        self._halo.setPen(ring)
         self._halo.setBrush(QBrush(Qt.BrushStyle.NoBrush))
-        self._halo.hide()
+        self._halo.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self._halo.setZValue(1)
+        self._mark = QGraphicsEllipseItem(-4.0, -4.0, 8.0, 8.0, self)
+        self._mark.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+        mark_pen = QPen(QColor(18, 10, 32, 180), 1.2)
+        mark_pen.setCosmetic(True)
+        self._mark.setPen(mark_pen)
+        self._mark.setBrush(QBrush(QColor(255, 252, 255, 245)))
+        self._mark.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self._mark.setZValue(2)
 
     def setRect(self, *args) -> None:
         super().setRect(*args)
