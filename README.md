@@ -133,25 +133,14 @@ Third-party components: [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
 Ubuntu fonts ship under the Ubuntu Font Licence 1.0 in `resources/fonts/`.  
 AppImage builds include notices under `usr/share/doc/meridian/` with [SOURCE_OFFER.txt](SOURCE_OFFER.txt).
 
-
 ---
 
 ## Lab setup status
 
-This repo was created empty (GitHub does not allow forking your own repo to yourself). Population from `dark1ltg/Meridian` `@ b48f89d` is in progress via Cloud Agent + GitHub MCP.
-
-**If the tree looks incomplete**, finish with a history-preserving mirror from your machine (you own the repo; the Cursor GitHub App installation token cannot push here):
-
-```bash
-git clone --bare https://github.com/dark1ltg/Meridian.git /tmp/Meridian.git
-cd /tmp/Meridian.git
-git push --mirror https://github.com/dark1ltg/Meridian-lab.git
-```
-
-After a mirror, re-apply this README banner (mirror overwrites `main`/`master` history).
+The working tree matches [`dark1ltg/Meridian`](https://github.com/dark1ltg/Meridian) at `b48f89d2469f691dcbad804a6e48f0bf08ce0bfa` (`master`), plus this lab banner and [POPULATE.md](POPULATE.md). Git history here is still the lab history, not a mirror of upstream commits.
 
 ### Open as a separate Cursor Cloud project
 
-1. [cursor.com](https://cursor.com) → Cloud Agents / new project  
-2. Connect repo **`dark1ltg/Meridian-lab`** (not Meridian)  
-3. Use a dedicated environment so lab experiments never touch Meridian branches  
+1. [cursor.com](https://cursor.com) → Cloud Agents / new project
+2. Connect repo **`dark1ltg/Meridian-lab`** (not Meridian)
+3. Use a dedicated environment so lab experiments never touch Meridian branches

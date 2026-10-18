@@ -2,9 +2,11 @@
 
 `dark1ltg/Meridian-lab` is the experimental fork. Stable product stays in `dark1ltg/Meridian`.
 
-## 1. Finish the repo copy (one command)
+## 1. File tree
 
-From a machine logged in as **dark1ltg**:
+The lab working tree already matches `dark1ltg/Meridian` at `b48f89d` (application source, tests, packaging, fonts, and screenshots). History was not mirrored; lab commits stay on `main`.
+
+To replace this repo with a full history mirror later, from a machine logged in as **dark1ltg**:
 
 ```bash
 git clone --bare https://github.com/dark1ltg/Meridian.git /tmp/Meridian.git
@@ -12,7 +14,7 @@ cd /tmp/Meridian.git
 git push --mirror https://github.com/dark1ltg/Meridian-lab.git
 ```
 
-That copies full history, fonts, and screenshots. (This Cloud Agent cannot `git push` here.)
+That overwrites lab history. Re-apply the experimental README banner afterward.
 
 ## 2. Open a NEW Cursor workspace (required)
 

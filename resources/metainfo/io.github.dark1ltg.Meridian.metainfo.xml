@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AppStream metadata for software centers and AppImage desktop integration.
+  https://www.freedesktop.org/software/appstream/docs/
+-->
+<component type="desktop-application">
+  <id>io.github.dark1ltg.Meridian</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <name>Meridian</name>
+  <summary>Offline mood-map music player</summary>
+  <description>
+    <p>
+      Meridian is an offline music player that places your library on a mood map
+      (Shadow↔Glow / Still↔Kinetic) and builds a context-aware listen queue from
+      where you are on the map.
+    </p>
+    <p>
+      Import local folders, analyze tracks without an account, and browse by mood
+      instead of only by folder or playlist.
+    </p>
+  </description>
+  <launchable type="desktop-id">Meridian.desktop</launchable>
+  <url type="homepage">https://github.com/dark1ltg/Meridian</url>
+  <url type="bugtracker">https://github.com/dark1ltg/Meridian/issues</url>
+  <developer id="io.github.dark1ltg">
+    <name>dark1ltg</name>
+  </developer>
+  <provides>
+    <binary>Meridian</binary>
+  </provides>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+    <category>Player</category>
+  </categories>
+  <keywords>
+    <keyword>music</keyword>
+    <keyword>player</keyword>
+    <keyword>mood</keyword>
+    <keyword>library</keyword>
+    <keyword>queue</keyword>
+  </keywords>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="1.3.6" date="2026-10-18">
+      <description>
+        <p>
+          AppImage refresh (still 1.3.6): louder-normalized short listens,
+          audible-span windows, shape/timbre/steer for the queue, placement
+          honesty cues (dialogue drop, tonal×onset blend, pitch Glow, pulse
+          Kinetic, keyword undo, sub-bass Shadow), kept-prior mass re-queue
+          bug fix, plus earlier path-to-9 blend and dual-worker analyze.
+        </p>
+      </description>
+    </release>
+    <release version="1.3.5" date="2026-09-07">
+      <description>
+        <p>
+          More honest offline mood placement, dual-window acoustic cues,
+          smarter local recommendations (matrix-first context queue gap-fill so
+          SHELF no longer crowds out NOW/DEEP/FILL), AppImage desktop install,
+          and reliability fixes for BPM/signal trust, library scan, matrix /
+          context queue, crossfade credit, safer quit, and mood-map interaction.
+        </p>
+      </description>
+    </release>
+  </releases>
+</component>

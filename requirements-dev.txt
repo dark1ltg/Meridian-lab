@@ -1,5 +1,2 @@
-PySide6>=6.6
-mutagen>=1.47
-numpy>=1.26
-aubio>=0.4.9
+# Dev / test tools (not needed for AppImage runtime).
 pytest>=8.0

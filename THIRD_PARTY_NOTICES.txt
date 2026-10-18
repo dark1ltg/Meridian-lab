@@ -1,0 +1,117 @@
+Meridian — third-party notices
+================================
+
+Meridian itself is licensed under the GNU General Public License version 3
+(GPL-3.0-only). See LICENSE (also COPYING) in this documentation directory.
+
+This file identifies other software and Font Software redistributed with
+Meridian AppImage builds, and where their full licence texts are stored.
+A machine-oriented list of detected bundled native libraries and build-host
+package versions is in third-party/BUILD_LIBRARIES.txt (generated at pack time).
+
+Qt libraries are treated as separate LGPL-3.0 (or GPL-3.0) components, not as
+forcing every file in the AppImage into a single GPL-3 combined work beyond
+Meridian’s own code and other GPL components.
+
+----------------------------------------------------------------------------
+mutagen
+----------------------------------------------------------------------------
+Purpose:  Audio metadata / tag reading
+License:  GPL-2.0-or-later
+Texts:    third-party/mutagen/
+
+----------------------------------------------------------------------------
+PySide6 / Qt for Python / shiboken6 / Qt 6
+----------------------------------------------------------------------------
+Purpose:  UI and multimedia (Qt 6)
+License:  LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+          Meridian uses Qt under LGPL-3.0 as separate library components
+          (GPL-3 texts also included). Do not use the GPL-2.0-only option
+          together with Meridian’s GPL-3.0-only code.
+Texts:    third-party/qt6/LGPL-3.0-only.txt
+          third-party/qt6/GPL-3.0-only.txt
+          third-party/pyside6/
+          third-party/qt-for-python-NOTICE.txt
+
+----------------------------------------------------------------------------
+numpy
+----------------------------------------------------------------------------
+Purpose:  Numeric analysis for mood features
+License:  BSD-3-Clause (and other permissive notices in the numpy tree)
+Texts:    third-party/numpy/
+
+----------------------------------------------------------------------------
+aubio
+----------------------------------------------------------------------------
+Purpose:  Fast tempo / onset features for mood-map energy (kinetic axis)
+License:  GPL-3.0-or-later (see upstream COPYING)
+Texts:    third-party/aubio/
+
+----------------------------------------------------------------------------
+PyInstaller (bootloader)
+----------------------------------------------------------------------------
+Purpose:  Application packaging bootloader shipped inside the AppImage
+License:  GPL-2.0-or-later WITH Bootloader-exception
+Texts:    third-party/pyinstaller/
+
+----------------------------------------------------------------------------
+Ubuntu Sans / Ubuntu Condensed (Font Software)
+----------------------------------------------------------------------------
+Purpose:  Application UI fonts
+License:  Ubuntu Font Licence 1.0
+Texts:    ../fonts/truetype/meridian/  (standalone font files + UFL)
+          and ubuntu-font-licence/ in this documentation tree
+
+----------------------------------------------------------------------------
+FFmpeg libraries / Qt FFmpeg multimedia plugin (bundled)
+----------------------------------------------------------------------------
+Purpose:  Playback via Qt Multimedia’s FFmpeg plugin (libavcodec and related)
+License:  Build-host FFmpeg (often GPL-3.0-only on Arch/CachyOS) — see
+          third-party/ffmpeg-libs/ and BUILD_LIBRARIES.txt
+Texts:    third-party/ffmpeg-libs/ (GPL-3.0-only.txt and any copied package files)
+
+----------------------------------------------------------------------------
+x265 (bundled when pulled by libavcodec)
+----------------------------------------------------------------------------
+Purpose:  Optional HEVC support via FFmpeg stack
+License:  GPL-2.0-or-later (compatible with Meridian GPL-3 via “or later”)
+Texts:    third-party/x265/
+
+----------------------------------------------------------------------------
+LAME libmp3lame (bundled when pulled by libavcodec)
+----------------------------------------------------------------------------
+Purpose:  MP3 encode/decode support via FFmpeg stack
+License:  LGPL-2.0-only
+Texts:    third-party/lame/LGPL-2.0.txt
+
+----------------------------------------------------------------------------
+Other common codecs / crypto pulled by the FFmpeg or Qt stack
+----------------------------------------------------------------------------
+libvpx, aom, opus, dav1d, openh264, libvorbis — typically BSD-style
+  Texts:  third-party/libvpx/, aom/, opus/, dav1d/, openh264/, libvorbis/
+libbluray — LGPL-2.1  Texts: third-party/libbluray/
+libheif — LGPL-3.0-or-later  Texts: third-party/libheif/
+OpenSSL (libssl/libcrypto) — Apache-2.0  Texts: third-party/openssl/
+
+See BUILD_LIBRARIES.txt for which of these were detected in a given build.
+
+----------------------------------------------------------------------------
+ffmpeg CLI (host — mood analysis; not bundled)
+----------------------------------------------------------------------------
+Meridian invokes a host `ffmpeg` binary on PATH for optional mood analysis.
+Install it separately under whatever licence applies to your system package.
+
+----------------------------------------------------------------------------
+libx264 (host — not bundled)
+----------------------------------------------------------------------------
+libx264 is commonly GPL-2.0-only and must not be redistributed inside this
+GPL-3.0-only AppImage. Bundled libavcodec may load the host libx264 at
+runtime when present. Install your distribution’s x264 / libx264 package
+(e.g. Arch/CachyOS: `pacman -S x264`). Meridian warns at startup if it is
+missing while the FFmpeg media backend is in use.
+
+----------------------------------------------------------------------------
+appimagetool (build-only)
+----------------------------------------------------------------------------
+Used only to assemble the AppImage; not shipped inside Meridian. Upstream
+licence is MIT.

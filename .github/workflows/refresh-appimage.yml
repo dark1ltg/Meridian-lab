@@ -1,0 +1,98 @@
+# On-demand / marker-triggered: rebuild Ubuntu 24.04 AppImage, move v1.3.6
+# tag to this commit, recreate the release, and replace the AppImage asset.
+name: Refresh AppImage (v1.3.6)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/trigger-appimage-refresh"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-appimage-v136
+  cancel-in-progress: true
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build AppImage (Ubuntu 24.04)
+        run: bash packaging/build-appimage-ubuntu2404.sh
+
+      - name: Verify artifact
+        run: |
+          set -euo pipefail
+          test -f dist/Meridian-x86_64.AppImage
+          # Docker/proot builds leave dist root-owned on the bind mount; reclaim
+          # so chmod / checksum writes succeed on the runner user.
+          if [[ ! -w dist ]] || [[ ! -O dist/Meridian-x86_64.AppImage ]]; then
+            sudo chown -R "$(id -u):$(id -g)" dist
+          fi
+          chmod +x dist/Meridian-x86_64.AppImage
+          # Write checksum to runner temp (always writable); keep a copy in dist
+          # when possible for local/upload convenience.
+          SHA_FILE="${RUNNER_TEMP}/Meridian-x86_64.AppImage.sha256"
+          sha256sum dist/Meridian-x86_64.AppImage | tee "$SHA_FILE"
+          cp -f "$SHA_FILE" dist/Meridian-x86_64.AppImage.sha256
+          # audit expects an AppDir (build script already audited during package);
+          # fall back to extracting the AppImage if AppDir was cleaned up.
+          if [[ -d dist/Meridian.AppDir ]]; then
+            python3 packaging/audit-appimage-glibc.py dist/Meridian.AppDir
+          else
+            mkdir -p "${RUNNER_TEMP}/meridian-ai-audit"
+            cd "${RUNNER_TEMP}/meridian-ai-audit"
+            "$GITHUB_WORKSPACE/dist/Meridian-x86_64.AppImage" --appimage-extract >/dev/null
+            python3 "$GITHUB_WORKSPACE/packaging/audit-appimage-glibc.py" squashfs-root
+          fi
+
+      - name: Retag, recreate release, upload AppImage
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          SHA_FILE="${RUNNER_TEMP}/Meridian-x86_64.AppImage.sha256"
+          if [[ ! -f "$SHA_FILE" ]]; then
+            SHA_FILE=dist/Meridian-x86_64.AppImage.sha256
+          fi
+          SHA=$(cut -d' ' -f1 "$SHA_FILE")
+          COMMIT=${GITHUB_SHA}
+          NOTES="Meridian 1.3.6 — source archives + AppImage refreshed $(date -u +%Y-%m-%d). Version stays **1.3.6**.
+
+          ## What’s new (plain English)
+          - **Bug fix (critical):** first-run analyze now starts after scan on newer Qt/PySide (the handoff was silently dropped before).
+          - **Faster on SSDs:** two waveform listeners on flash storage; one on hard drives (override: \`MERIDIAN_ANALYZE_WORKERS=1\` or \`2\`).
+          - **Smarter short listens:** long songs get intro / middle / end tastes (~12s each) instead of one mid-track peek.
+          - **Whole library on the map:** any audible listen places a star (weak when partial); tags alone place a rough star; only truly empty tracks stay pending.
+          - **Bug fixes:** good listens are not wiped by a bad retry; rough pins stay dim; scan waits while analyze/tidy runs; tidy runs off the UI thread; honest status when a pass was tags-only.
+
+          Source tag \`v1.3.6\` points at master \`${COMMIT}\` (GitHub Source code zip/tar.gz match this commit).
+          AppImage SHA256: \`${SHA}\`
+
+          See [CHANGELOG.md](https://github.com/dark1ltg/Meridian/blob/master/CHANGELOG.md) for full notes.
+
+          ## Still in 1.3.6
+          Queue/Rescan/search reliability (2026-10-02), mood-map import UX (2026-09-25), Renew Queue, mid-fade credit, VA album anti-repeat, BPM 0 scan confidence, Renew first-run tip, pin lock rings."
+
+          # Drop existing release + tag so source archives and published_at refresh.
+          gh release delete v1.3.6 --yes || true
+          git push origin :refs/tags/v1.3.6 || true
+          git tag -f v1.3.6 "$COMMIT"
+          git push origin "refs/tags/v1.3.6"
+
+          gh release create v1.3.6 \
+            --title "Meridian 1.3.6" \
+            --notes "$NOTES" \
+            --target "$COMMIT" \
+            dist/Meridian-x86_64.AppImage
+
+          echo "Published https://github.com/dark1ltg/Meridian/releases/tag/v1.3.6"
+          echo "AppImage https://github.com/dark1ltg/Meridian/releases/download/v1.3.6/Meridian-x86_64.AppImage"
+          echo "SHA256 ${SHA}"

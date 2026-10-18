@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""Convenience launcher: python meridian_app.py"""
-
-from meridian.app import main
+from meridian.app import run
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run())
