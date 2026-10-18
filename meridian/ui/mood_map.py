@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from math import atan2, hypot, log2, pi
 
+import numpy as np
+
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QBrush,
@@ -111,7 +113,76 @@ SKY_LINK_MIN = 14.0
 SKY_LINK_MAX = 118.0
 # Reject a second link that leaves the same star along almost the same bearing.
 SKY_LINK_ANGLE = 0.65
-SKY_LINK_CELL_CAP = 24
+
+
+def constellation_segments(
+    points: list[tuple[int, float, float]],
+) -> list[tuple[float, float, float, float, float]]:
+    """Nearest-neighbor links, as (x1, y1, x2, y2, distance).
+
+    A cell is one max-link wide, so the 3×3 around a star holds every song
+    close enough to connect. Crowded cells are searched in full.
+    """
+    count = len(points)
+    if count < 2:
+        return []
+    ids = [point[0] for point in points]
+    xs = np.empty(count, dtype=np.float64)
+    ys = np.empty(count, dtype=np.float64)
+    for index, (_, x, y) in enumerate(points):
+        xs[index] = x
+        ys[index] = y
+    cell = SKY_LINK_MAX
+    buckets: dict[tuple[int, int], list[int]] = {}
+    for index in range(count):
+        key = (int(xs[index] // cell), int(ys[index] // cell))
+        buckets.setdefault(key, []).append(index)
+    seen: set[tuple[int, int]] = set()
+    segments: list[tuple[float, float, float, float, float]] = []
+    for (gx, gy), members in buckets.items():
+        neigh: list[int] = []
+        for ox in (-1, 0, 1):
+            for oy in (-1, 0, 1):
+                neigh.extend(buckets.get((gx + ox, gy + oy), ()))
+        if len(neigh) < 2:
+            continue
+        neigh_idx = np.asarray(neigh, dtype=np.int32)
+        member_idx = np.asarray(members, dtype=np.int32)
+        dist = np.hypot(
+            xs[member_idx, None] - xs[neigh_idx],
+            ys[member_idx, None] - ys[neigh_idx],
+        )
+        dist[(dist < SKY_LINK_MIN) | (dist > SKY_LINK_MAX)] = np.inf
+        order = np.argsort(dist, axis=1)
+        for row, mi in enumerate(member_idx):
+            bearings: list[float] = []
+            kept = 0
+            px = float(xs[mi])
+            py = float(ys[mi])
+            tid = ids[int(mi)]
+            for col in order[row]:
+                span = float(dist[row, col])
+                if span == np.inf:
+                    break
+                other_i = int(neigh_idx[int(col)])
+                bearing = atan2(float(ys[other_i]) - py, float(xs[other_i]) - px)
+                if any(
+                    abs((bearing - prev + pi) % (2 * pi) - pi) < SKY_LINK_ANGLE
+                    for prev in bearings
+                ):
+                    continue
+                bearings.append(bearing)
+                other = ids[other_i]
+                edge = (tid, other) if tid < other else (other, tid)
+                if edge not in seen:
+                    seen.add(edge)
+                    segments.append(
+                        (px, py, float(xs[other_i]), float(ys[other_i]), span)
+                    )
+                kept += 1
+                if kept >= SKY_LINK_K:
+                    break
+    return segments
 
 # View magnification on top of fit-to-widget (1 = whole night sky).
 VIEW_ZOOM_MIN = 1.0
@@ -462,6 +533,10 @@ class MoodMap(QGraphicsView):
         # Press on star core — wait for move before pan vs pin (avoids viewport nudge).
         self._sky_defer_pan = False
         self._field_sig: object | None = None
+        self._link_cache_key: tuple | None = None
+        self._link_cache: list[tuple[float, float, float, float, float]] = []
+        self._baked_link_key: tuple | None = None
+        self._baked_links: QImage | None = None
         self._pending_snap_id: int | None = None
         self._snap_timer = QTimer(self)
         self._snap_timer.setSingleShot(True)
@@ -740,16 +815,10 @@ class MoodMap(QGraphicsView):
                     radius,
                     radius,
                 )
-        link_pen = QPen(QColor(206, 196, 230, 64))
-        link_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
-        for ax, ay, bx, by, dist in self._constellation_segments():
-            span = SKY_LINK_MAX - SKY_LINK_MIN
-            fade = (dist - SKY_LINK_MIN) / span if span else 0.0
-            link_pen.setColor(QColor(186, 178, 214, int(54 - 18 * fade)))
-            link_pen.setWidthF(0.55 if dist < 52 else 0.4)
-            painter.setPen(link_pen)
-            painter.drawLine(QPointF(ax, ay), QPointF(bx, by))
+        painter.save()
+        painter.resetTransform()
+        painter.drawImage(0, 0, self._baked_link_image())
+        painter.restore()
         painter.setPen(Qt.PenStyle.NoPen)
         for item in order:
             pos = self._positions[item.track.id]
@@ -828,53 +897,45 @@ class MoodMap(QGraphicsView):
         return radius, color, bloom
 
     def _constellation_segments(self) -> list[tuple[float, float, float, float, float]]:
-        """Sparse nearest-neighbor links, as (x1, y1, x2, y2, distance)."""
-        positions = self._positions
-        if len(positions) < 2:
+        """Links for the baked sky. Reused while stars stay put, so a lens recolor is cheap."""
+        points = [(tid, pos.x(), pos.y()) for tid, pos in self._positions.items()]
+        if len(points) < 2:
+            self._link_cache_key = None
+            self._link_cache = []
             return []
-        grid = self._star_grid
-        cell = CLUSTER_GRID
-        span = int(SKY_LINK_MAX // cell) + 1
-        seen: set[tuple[int, int]] = set()
-        segments: list[tuple[float, float, float, float, float]] = []
-        for tid, pos in positions.items():
-            cx0 = int(pos.x() // cell)
-            cy0 = int(pos.y() // cell)
-            candidates: list[tuple[float, int, QPointF]] = []
-            for gx in range(cx0 - span, cx0 + span + 1):
-                for gy in range(cy0 - span, cy0 + span + 1):
-                    bucket = grid.get((gx, gy))
-                    if not bucket:
-                        continue
-                    scan = bucket if len(bucket) <= SKY_LINK_CELL_CAP else bucket[:SKY_LINK_CELL_CAP]
-                    for other, other_pos in scan:
-                        if other == tid:
-                            continue
-                        dist = hypot(other_pos.x() - pos.x(), other_pos.y() - pos.y())
-                        if dist < SKY_LINK_MIN or dist > SKY_LINK_MAX:
-                            continue
-                        candidates.append((dist, other, other_pos))
-            candidates.sort()
-            nearest: list[tuple[float, int, QPointF]] = []
-            bearings: list[float] = []
-            for dist, other, other_pos in candidates:
-                if len(nearest) >= SKY_LINK_K:
-                    break
-                bearing = atan2(other_pos.y() - pos.y(), other_pos.x() - pos.x())
-                if any(
-                    abs((bearing - prev + pi) % (2 * pi) - pi) < SKY_LINK_ANGLE
-                    for prev in bearings
-                ):
-                    continue
-                nearest.append((dist, other, other_pos))
-                bearings.append(bearing)
-            for dist, other, other_pos in nearest:
-                edge = (tid, other) if tid < other else (other, tid)
-                if edge in seen:
-                    continue
-                seen.add(edge)
-                segments.append((pos.x(), pos.y(), other_pos.x(), other_pos.y(), dist))
+        key = tuple(points)
+        if key == self._link_cache_key:
+            return self._link_cache
+        segments = constellation_segments(points)
+        self._link_cache_key = key
+        self._link_cache = segments
         return segments
+
+    def _baked_link_image(self) -> QImage:
+        """Baked lines. Reused while stars stay put so a recolor does not redraw them."""
+        self._constellation_segments()
+        if self._baked_links is not None and self._baked_link_key == self._link_cache_key:
+            return self._baked_links
+        width, height = SCENE_W * FIELD_SCALE, SCENE_H * FIELD_SCALE
+        image = QImage(width, height, QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.scale(FIELD_SCALE, FIELD_SCALE)
+        link_pen = QPen(QColor(206, 196, 230, 64))
+        link_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+        span = SKY_LINK_MAX - SKY_LINK_MIN
+        for ax, ay, bx, by, dist in self._link_cache:
+            fade = (dist - SKY_LINK_MIN) / span if span else 0.0
+            link_pen.setColor(QColor(186, 178, 214, int(54 - 18 * fade)))
+            link_pen.setWidthF(0.55 if dist < 52 else 0.4)
+            painter.setPen(link_pen)
+            painter.drawLine(QPointF(ax, ay), QPointF(bx, by))
+        painter.end()
+        self._baked_links = image
+        self._baked_link_key = self._link_cache_key
+        return image
 
     def _rebuild_star_grid(self) -> None:
         grid: dict[tuple[int, int], list[tuple[int, QPointF]]] = {}

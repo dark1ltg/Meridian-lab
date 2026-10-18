@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import random
+import time
 
 import pytest
 
@@ -19,10 +21,12 @@ from meridian.library import Track
 from meridian.queue_engine import Quadrant, RankedTrack
 from meridian.ui.mood_map import (
     LOVED_RING_QCOLOR,
+    SKY_LINK_MAX,
     STAR_BODY_FLOOR,
     STAR_BODY_FLOOR_DENSE,
     MoodMap,
     TrackStar,
+    constellation_segments,
     night_body_radius,
     queue_star_color,
 )
@@ -136,3 +140,89 @@ def test_baked_low_star_is_pewter_and_loved_ring_paints(qapp) -> None:
             if c.red() > 200 and c.green() > 180 and 140 < c.blue() < 230:
                 gold += 1
     assert gold >= 4
+
+
+def _linked(points: list[tuple[int, float, float]], a: int, b: int) -> bool:
+    coords = {tid: (x, y) for tid, x, y in points}
+    ax, ay = coords[a]
+    bx, by = coords[b]
+    for x1, y1, x2, y2, _dist in constellation_segments(points):
+        if (x1, y1, x2, y2) in ((ax, ay, bx, by), (bx, by, ax, ay)):
+            return True
+    return False
+
+
+def test_crowded_cell_links_the_real_neighbor() -> None:
+    """A pile of songs must not hide the closest one that is far enough to draw."""
+    points = [(1, 400.0, 300.0)]
+    for i in range(2, 30):
+        points.append((i, 400.0 + (i % 5) * 0.4, 300.0 + (i % 3) * 0.4))
+    points.append((99, 428.0, 300.0))
+    assert _linked(points, 1, 99)
+
+
+def test_different_bearing_survives_a_crowd_on_one_side() -> None:
+    points = [(0, 400.0, 300.0)]
+    for i in range(1, 31):
+        points.append((i, 400.0 + 20.0 + i * 0.8, 300.0))
+    points.append((50, 400.0, 300.0 + 70.0))
+    assert _linked(points, 0, 1)
+    assert _linked(points, 0, 50)
+    points.append((77, 400.0 + SKY_LINK_MAX + 40.0, 300.0))
+    assert not _linked(points, 0, 77)
+
+
+def test_recolor_reuses_links_and_a_large_map_stays_quick(qapp, monkeypatch) -> None:
+    import meridian.ui.mood_map as mood_map
+
+    calls = {"n": 0}
+    rebuilds = {"n": 0}
+    real = mood_map.constellation_segments
+    real_rebuild = MoodMap._rebuild_starfield
+
+    def wrapped(points):
+        calls["n"] += 1
+        return real(points)
+
+    def wrapped_rebuild(self):
+        rebuilds["n"] += 1
+        real_rebuild(self)
+
+    monkeypatch.setattr(mood_map, "constellation_segments", wrapped)
+    monkeypatch.setattr(MoodMap, "_rebuild_starfield", wrapped_rebuild)
+    mood = MoodMap()
+    mood.resize(640, 480)
+    first = [
+        _ranked(_track(i, valence=(i % 40) / 39, energy=((i * 3) % 40) / 39), Quadrant.NOW)
+        for i in range(1, 81)
+    ]
+    mood.set_tracks(first, None)
+    assert calls["n"] == 1
+    recolored = [
+        _ranked(item.track, Quadrant.DEEP if item.track.id % 2 == 0 else Quadrant.NOW)
+        for item in first
+    ]
+    mood.set_tracks(recolored, None)
+    assert rebuilds["n"] == 2
+    assert calls["n"] == 1
+
+    rng = random.Random(0)
+    points = [(i, 40 + rng.random() * 720, 36 + rng.random() * 524) for i in range(4000)]
+    started = time.perf_counter()
+    real(points)
+    assert time.perf_counter() - started < 0.5
+
+    big = MoodMap()
+    big.resize(400, 300)
+    library = [
+        _ranked(_track(i, valence=rng.random(), energy=rng.random()), Quadrant.NOW)
+        for i in range(1, 1501)
+    ]
+    big.set_tracks(library, None)
+    recolored = [
+        _ranked(item.track, Quadrant.SHELF if item.track.id % 2 == 0 else Quadrant.FILL)
+        for item in library
+    ]
+    started = time.perf_counter()
+    big.set_tracks(recolored, None)
+    assert time.perf_counter() - started < 0.15
