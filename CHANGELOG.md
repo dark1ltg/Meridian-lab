@@ -31,7 +31,7 @@ Version stays **1.3.6**. This refresh makes the short listen more honest and the
 - Lines between nearby songs are worked out once and reused when only the queue colors change, so moving the lens does not stall a large library. A crowded patch still connects the closest songs.
 - The middle of the night sky is easier to see: a soft cross marks Shadow against Glow and Still against Kinetic.
 - Stars stay white, or pewter when the guess is weak, until the lens covers them. Inside the lens they take the matrix color. The committed queue is a path on the sky, brightest on the song that is playing.
-- The matrix and the context queue use the same stars as the map: a small night sky for each bucket, then the name beside its star.
+- The context queue rows are stars in play order. The four matrix lists are plain names again, with the colored top edge and subtitle.
 - The quarter grid is gone. The four corners carry colder or warmer light, and diving in fades the constellations and grows a name plus a role chip.
 
 ### What’s new (plain English)

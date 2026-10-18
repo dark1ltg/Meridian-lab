@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QRadialGradient
+from PySide6.QtCore import QPointF, Qt, Signal
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFrame,
@@ -86,45 +86,6 @@ class StarList(FitList):
         self.setItemDelegate(StarDelegate(self))
 
 
-class SkyStrip(QWidget):
-    """One matrix bucket as a small piece of the same night sky."""
-
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self.setFixedHeight(58)
-        self._stars: list[tuple[float, float, QColor, bool]] = []
-
-    def set_stars(self, stars: list[tuple[float, float, QColor, bool]]) -> None:
-        self._stars = list(stars)
-        self.update()
-
-    def paintEvent(self, _event) -> None:
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        rect = QRectF(self.rect())
-        sky = QRadialGradient(rect.center(), max(rect.width(), rect.height()) * 0.7)
-        sky.setColorAt(0.0, QColor("#1b0c32"))
-        sky.setColorAt(1.0, QColor("#07010f"))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(sky))
-        painter.drawRoundedRect(rect.adjusted(0, 0, -1, -1), 8, 8)
-        if not self._stars:
-            return
-        pad = 10.0
-        span_x = max(8.0, rect.width() - pad * 2)
-        span_y = max(8.0, rect.height() - pad * 2)
-        for valence, energy, color, loved in self._stars:
-            x = pad + max(0.0, min(1.0, valence)) * span_x
-            y = pad + (1.0 - max(0.0, min(1.0, energy))) * span_y
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(color)
-            painter.drawEllipse(QPointF(x, y), 2.6, 2.6)
-            if loved:
-                painter.setPen(QPen(QColor("#fff4c2"), 1.0))
-                painter.setBrush(Qt.BrushStyle.NoBrush)
-                painter.drawEllipse(QPointF(x, y), 4.0, 4.0)
-
-
 class MatrixCell(QFrame):
     activated = Signal(int)
     pulled = Signal(int)
@@ -144,22 +105,19 @@ class MatrixCell(QFrame):
         sub.setObjectName("quadSub")
         sub.setWordWrap(False)
         sub.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
-        self.sky = SkyStrip()
-        self.list = StarList()
+        self.list = FitList()
         self.list.setObjectName("quadList")
         self.list.setFont(condensed(12))
         self.list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.list.itemClicked.connect(self._activate)
         layout.addWidget(title)
         layout.addWidget(sub)
-        layout.addWidget(self.sky)
         layout.addWidget(self.list, 1)
         self.setStyleSheet(
             f"""
             QFrame#matrixCell {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #160b28, stop:1 #0c0616);
-                border: 1px solid #2a2044;
+                background: #121a2e;
+                border: 1px solid #243049;
                 border-top: 2px solid {color};
                 border-radius: 10px;
             }}
@@ -173,29 +131,16 @@ class MatrixCell(QFrame):
 
     def populate(self, items: list[RankedTrack], limit: int = 12) -> None:
         self.list.clear()
-        shown = items[:limit]
-        color = QColor(PLAYLIST_HEX[self.quadrant])
-        self.sky.set_stars(
-            [
-                (ranked.track.valence, ranked.track.energy, color, bool(ranked.track.loved))
-                for ranked in shown
-            ]
-        )
-        for ranked in shown:
+        for ranked in items[:limit]:
             row = QListWidgetItem(ranked.track.short_title)
             row.setData(Qt.ItemDataRole.UserRole, ranked.track.id)
-            row.setData(STAR_COLOR_ROLE, PLAYLIST_HEX[self.quadrant])
-            row.setData(STAR_LOVED_ROLE, bool(ranked.track.loved))
-            row.setData(STAR_CURRENT_ROLE, False)
-            row.setData(STAR_LINK_ROLE, True)
             row.setToolTip(
                 f"{ranked.track.label}\n"
                 f"Fit {ranked.fit:.0%} · Importance {ranked.importance:.0%} · Urgency {ranked.urgency:.0%}"
             )
-            ink = QColor(PLAYLIST_HEX[self.quadrant])
+            row.setForeground(QColor(PLAYLIST_HEX[self.quadrant]))
             if ranked.track.loved:
-                ink = ink.lighter(125)
-            row.setForeground(ink)
+                row.setForeground(QColor(PLAYLIST_HEX[self.quadrant]).lighter(125))
             self.list.addItem(row)
 
 
