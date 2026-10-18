@@ -1,0 +1,59 @@
+Written offer for Corresponding Source
+======================================
+
+Meridian is free software under the GNU General Public License version 3.
+
+This AppImage is a non-source (object / binary) form of Meridian together with
+bundled libraries. Pursuant to GPLv3 section 6:
+
+----------------------------------------------------------------------------
+A. Meridian program
+----------------------------------------------------------------------------
+
+  1. The preferred form of Meridian source used to produce this build is the
+     Meridian source tree that accompanies the release (repository checkout or
+     source archive published with the same version as this AppImage).
+
+  2. This written offer is valid for at least three (3) years from the date
+     this AppImage was built, and for as long as Meridian support or updates
+     for this product model are offered.
+
+  3. Anyone who possesses this AppImage may obtain a copy of the Corresponding
+     Source for Meridian at no charge via the same distribution channel used
+     for this AppImage (source archive or version-control tag matching the
+     AppImage version), or by requesting it from the copyright holders of
+     Meridian using the contact information published with that release.
+
+----------------------------------------------------------------------------
+B. Other GPL / LGPL components redistributed in this AppImage
+----------------------------------------------------------------------------
+
+  Bundled native libraries (for example FFmpeg libav*, x265, Qt/PySide6 under
+  LGPL-3 or GPL-3 as applicable) are recorded with build-host package names
+  and versions in:
+
+      usr/share/doc/meridian/third-party/BUILD_LIBRARIES.txt
+
+  Corresponding Source for those components may be obtained, at no charge,
+  from the same operating-system distribution / package archive that provided
+  the recorded versions (for Arch Linux / CachyOS style hosts: the official
+  package sources for the named packages at the recorded versions; for other
+  hosts: the equivalent source packages or upstream release tarballs matching
+  those versions). Licence texts for those components are included under:
+
+      usr/share/doc/meridian/third-party/
+
+  Qt for Python / Qt 6 libraries are offered under LGPL-3.0 (and optionally
+  GPL-3.0) as separate components; full LGPL-3.0 and GPL-3.0 texts are in
+  third-party/qt6/ and third-party/pyside6/.
+
+----------------------------------------------------------------------------
+C. Not redistributed in this AppImage
+----------------------------------------------------------------------------
+
+  - Host `ffmpeg` CLI (mood analysis) — install separately.
+  - Host `libx264` (GPL-2.0-only; incompatible to bundle with Meridian GPL-3)
+    — install separately if needed for H.264 via Qt’s FFmpeg plugin.
+
+Build Meridian from source with the scripts in packaging/ as described in
+README.md.
