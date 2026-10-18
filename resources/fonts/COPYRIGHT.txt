@@ -1,0 +1,9 @@
+Copyright 2010–2011 Canonical Ltd.
+Copyright 2011, 2022, 2023 Canonical Ltd. (Ubuntu Sans)
+
+This directory contains Ubuntu Font Family / Ubuntu Sans Font Software
+distributed under the Ubuntu Font Licence Version 1.0.
+
+See UBUNTU-FONT-LICENCE-1.0.txt (also UFL.txt / LICENCE.txt) in this directory.
+Upstream: https://github.com/canonical/Ubuntu-Sans-fonts
+           https://design.ubuntu.com/font/

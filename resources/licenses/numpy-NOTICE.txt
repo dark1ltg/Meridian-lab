@@ -1,0 +1,6 @@
+# Fallback when the installed NumPy package does not expose licence files.
+
+NumPy is available under a BSD-style licence (BSD-3-Clause and related
+permissive notices). See https://numpy.org/license.html and the licence files
+shipped with your NumPy source or wheel (often LICENSE.txt under the numpy
+package or dist-info/licenses/).

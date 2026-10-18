@@ -1,0 +1,7 @@
+# Fallback when the installed aubio package does not expose licence files.
+
+aubio is free software under the GNU General Public License (typically
+GPL-3.0-or-later for recent releases). See https://aubio.org/ and the
+COPYING file in the aubio source tree.
+
+Meridian uses aubio for fast tempo / onset features during mood analysis.
