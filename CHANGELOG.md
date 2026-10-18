@@ -29,6 +29,7 @@ Version stays **1.3.6**. This refresh makes the short listen more honest and the
 - Mood map uses an OpenGL viewport by default. A helper process checks the driver first; if that check fails, the map stays on the software widget. `MERIDIAN_NO_GL=1`, `MERIDIAN_GL=off`, `QT_OPENGL=software`, or `LIBGL_ALWAYS_SOFTWARE=1` keep software.
 - Night-sky stars stay large enough to see at fit zoom, including a big library. A weak guess leans pewter instead of a dimmer neon, and a loved star keeps a warm ring.
 - Lines between nearby songs are worked out once and reused when only the queue colors change, so moving the lens does not stall a large library. A crowded patch still connects the closest songs.
+- The middle of the night sky is easier to see: a soft cross marks Shadow against Glow and Still against Kinetic. The lighter quarter marks stay in the background.
 
 ### What’s new (plain English)
 

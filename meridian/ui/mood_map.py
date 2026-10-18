@@ -629,20 +629,33 @@ class MoodMap(QGraphicsView):
         item.setZValue(0)
         item.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         self._sky_bg = item
-        # Same quarter lines as before: Shadow → Glow across, Still → Kinetic up.
-        guide = QPen(QColor(206, 196, 230, 48), 1.0)
-        guide.setCosmetic(True)
+        # Quarter marks stay quiet. The middle cross is the Shadow|Glow and Still|Kinetic split.
+        quarter = QPen(QColor(206, 196, 230, 72), 1.0)
+        quarter.setCosmetic(True)
+        cross_glow = QPen(QColor(220, 214, 240, 80), 6.0)
+        cross_glow.setCosmetic(True)
+        cross_glow.setCapStyle(Qt.PenCapStyle.RoundCap)
+        cross = QPen(QColor(236, 230, 248, 190), 1.6)
+        cross.setCosmetic(True)
+        cross.setCapStyle(Qt.PenCapStyle.RoundCap)
+
+        def add_guide(x1: float, y1: float, x2: float, y2: float, pen: QPen) -> None:
+            guide = self._scene.addLine(x1, y1, x2, y2, pen)
+            guide.setZValue(1)
+            guide.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+            self._sky_chrome.append(guide)
+
         for i in range(1, 4):
             y = 36 + 524 * i / 4
-            horizontal = self._scene.addLine(40, y, 760, y, guide)
-            horizontal.setZValue(1)
-            horizontal.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
-            self._sky_chrome.append(horizontal)
             x = 40 + 720 * i / 4
-            vertical = self._scene.addLine(x, 36, x, 560, guide)
-            vertical.setZValue(1)
-            vertical.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
-            self._sky_chrome.append(vertical)
+            if i == 2:
+                add_guide(40, y, 760, y, cross_glow)
+                add_guide(x, 36, x, 560, cross_glow)
+                add_guide(40, y, 760, y, cross)
+                add_guide(x, 36, x, 560, cross)
+            else:
+                add_guide(40, y, 760, y, quarter)
+                add_guide(x, 36, x, 560, quarter)
         font = sans(11)
         font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.0)
         ink = QBrush(QColor(201, 192, 224))

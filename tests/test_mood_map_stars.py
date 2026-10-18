@@ -15,7 +15,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QGraphicsLineItem
 
 from meridian.library import Track
 from meridian.queue_engine import Quadrant, RankedTrack
@@ -226,3 +226,13 @@ def test_recolor_reuses_links_and_a_large_map_stays_quick(qapp, monkeypatch) -> 
     started = time.perf_counter()
     big.set_tracks(recolored, None)
     assert time.perf_counter() - started < 0.15
+
+
+def test_mood_cross_reads_stronger_than_the_quarter_marks(qapp) -> None:
+    mood = MoodMap()
+    lines = [item for item in mood._sky_chrome if isinstance(item, QGraphicsLineItem)]
+    center = [item for item in lines if abs(item.line().y1() - 298) < 1 and abs(item.line().x2() - 760) < 1]
+    quarter = [item for item in lines if abs(item.line().y1() - (36 + 524 / 4)) < 1]
+    assert center and quarter
+    assert max(item.pen().color().alpha() for item in center) >= 160
+    assert max(item.pen().color().alpha() for item in center) > quarter[0].pen().color().alpha()
