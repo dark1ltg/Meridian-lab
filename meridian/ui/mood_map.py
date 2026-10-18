@@ -450,7 +450,7 @@ class MoodMap(QGraphicsView):
         self._gpu_enabled = False
 
     def _draw_backdrop(self) -> None:
-        """Violet night sky, with Shadow/Glow and Still/Kinetic along the edges."""
+        """Violet night sky, with the Shadow/Glow and Still/Kinetic segments."""
         for item in self._sky_chrome:
             self._scene.removeItem(item)
         self._sky_chrome.clear()
@@ -469,6 +469,20 @@ class MoodMap(QGraphicsView):
         item.setZValue(0)
         item.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         self._sky_bg = item
+        # Same quarter lines as before: Shadow → Glow across, Still → Kinetic up.
+        guide = QPen(QColor(206, 196, 230, 48), 1.0)
+        guide.setCosmetic(True)
+        for i in range(1, 4):
+            y = 36 + 524 * i / 4
+            horizontal = self._scene.addLine(40, y, 760, y, guide)
+            horizontal.setZValue(1)
+            horizontal.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+            self._sky_chrome.append(horizontal)
+            x = 40 + 720 * i / 4
+            vertical = self._scene.addLine(x, 36, x, 560, guide)
+            vertical.setZValue(1)
+            vertical.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+            self._sky_chrome.append(vertical)
         font = sans(11)
         font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.0)
         ink = QBrush(QColor(201, 192, 224))
