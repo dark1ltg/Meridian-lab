@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from math import hypot, log2
+from math import atan2, hypot, log2, pi
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
-    QFont,
     QImage,
     QMouseEvent,
     QNativeGestureEvent,
@@ -29,22 +28,27 @@ from PySide6.QtWidgets import (
 )
 
 from meridian.context import LENS_RADIUS_DEFAULT, LENS_RADIUS_MAX, LENS_RADIUS_MIN
-from meridian.queue_engine import Quadrant, RankedTrack
+from meridian.queue_engine import RankedTrack
 from meridian.ui.fonts import sans
 from meridian.features import CONFIDENCE_HIGH, CONFIDENCE_LOW
 from meridian.ui.palette import (
     LOW_CONFIDENCE_OPACITY,
-    LOW_TRUST_ALPHA,
-    LOW_TRUST_QCOLOR,
-    MID_CONFIDENCE_ALPHA,
     MID_CONFIDENCE_OPACITY,
     PIN_HEAD_RADIUS,
     PIN_RING_QCOLOR,
     PIN_RING_WIDTH,
-    PLAYLIST_QCOLOR,
     STAR_RADIUS,
     STAR_Z,
 )
+
+# Night sky. Stars are moonlight, not playlist neon; the matrix still carries quadrant color.
+NIGHT_BG = QColor("#07010f")
+SKY_LINK_K = 3
+SKY_LINK_MIN = 14.0
+SKY_LINK_MAX = 118.0
+# Reject a second link that leaves the same star along almost the same bearing.
+SKY_LINK_ANGLE = 0.65
+SKY_LINK_CELL_CAP = 24
 
 # View magnification on top of fit-to-widget (1 = whole night sky).
 VIEW_ZOOM_MIN = 1.0
@@ -124,11 +128,12 @@ class TrackStar(QGraphicsEllipseItem):
 
     def apply_style(self, ranked: RankedTrack, current: bool) -> None:
         self.ranked = ranked
-        r = STAR_RADIUS[ranked.quadrant]
+        # Pinprick bodies. Zoom supplies the size; a 6px coin reads as a UI dot, not a star.
+        r = STAR_RADIUS[ranked.quadrant] * 0.36
         if ranked.track.loved:
-            r += 0.8
+            r += 0.28
         if ranked.track.pinned:
-            r += 0.7
+            r += 0.22
         self.setRect(-r, -r, r * 2, r * 2)
         conf = float(getattr(ranked.track, "mood_confidence", 0.5) or 0.5)
         # Pins are locked truth — always draw as high-trust body color.
@@ -142,44 +147,36 @@ class TrackStar(QGraphicsEllipseItem):
             band = "low"
 
         if band == "low":
-            color = QColor(LOW_TRUST_QCOLOR)
-            color.setAlpha(LOW_TRUST_ALPHA)
+            color = QColor(198, 188, 224)
             self.setOpacity(LOW_CONFIDENCE_OPACITY)
         elif band == "mid":
-            color = QColor(PLAYLIST_QCOLOR[ranked.quadrant])
-            color.setAlpha(MID_CONFIDENCE_ALPHA)
+            color = QColor(236, 230, 255)
             self.setOpacity(MID_CONFIDENCE_OPACITY)
+        elif ranked.track.loved:
+            color = QColor("#fff6e4")
+            self.setOpacity(1.0)
         else:
-            color = QColor(PLAYLIST_QCOLOR[ranked.quadrant])
+            color = QColor("#f7f4ff")
             self.setOpacity(1.0)
         self.setBrush(QBrush(color))
 
         pinned = bool(ranked.track.pinned)
         if current:
-            pen = QPen(QColor("#ffffff"), 2.0)
+            pen = QPen(QColor("#ffffff"), 1.2)
             pen.setCosmetic(True)
             self.setPen(pen)
             self.setZValue(14)
         elif pinned:
-            # Body uses a quiet edge; the lock ring carries the pin signal.
-            pen = QPen(QColor(8, 12, 22, 160), 1.0)
-            pen.setCosmetic(True)
-            self.setPen(pen)
+            self.setPen(QPen(Qt.PenStyle.NoPen))
             self.setZValue(STAR_Z[ranked.quadrant] + 3)
         elif ranked.track.loved:
-            pen = QPen(QColor("#fff4c2"), 1.4)
-            pen.setCosmetic(True)
-            self.setPen(pen)
+            self.setPen(QPen(Qt.PenStyle.NoPen))
             self.setZValue(STAR_Z[ranked.quadrant] + 1)
         elif band == "low":
-            pen = QPen(QColor(20, 28, 42, 200), 1.0)
-            pen.setCosmetic(True)
-            self.setPen(pen)
+            self.setPen(QPen(Qt.PenStyle.NoPen))
             self.setZValue(max(1, STAR_Z[ranked.quadrant] - 2))
         else:
-            pen = QPen(QColor(8, 12, 22, 180), 1.0)
-            pen.setCosmetic(True)
-            self.setPen(pen)
+            self.setPen(QPen(Qt.PenStyle.NoPen))
             self.setZValue(STAR_Z[ranked.quadrant])
 
         if pinned:
@@ -294,8 +291,8 @@ class TrackStar(QGraphicsEllipseItem):
 class LensItem(QGraphicsEllipseItem):
     def __init__(self) -> None:
         super().__init__(-90, -90, 180, 180)
-        self.setBrush(QBrush(QColor(109, 74, 255, 42)))
-        ring = QPen(QColor("#6D4AFF"), 2.5)
+        self.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+        ring = QPen(QColor(247, 244, 255, 220), 1.25)
         ring.setCosmetic(True)
         ring.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
         self.setPen(ring)
@@ -305,13 +302,11 @@ class LensItem(QGraphicsEllipseItem):
         self.setZValue(6)
         self.setCursor(Qt.CursorShape.SizeAllCursor)
         self._map: MoodMap | None = None
-        halo = QPen(QColor("#F4F1FF"), 3.7)
-        halo.setCosmetic(True)
-        halo.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        # Kept so setRect stays in sync; a second stroke would double the ring.
         self._halo = QGraphicsEllipseItem(-90, -90, 180, 180, self)
-        self._halo.setPen(halo)
+        self._halo.setPen(QPen(Qt.PenStyle.NoPen))
         self._halo.setBrush(QBrush(Qt.BrushStyle.NoBrush))
-        self._halo.setZValue(-1)
+        self._halo.hide()
 
     def setRect(self, *args) -> None:
         super().setRect(*args)
@@ -344,7 +339,7 @@ class MoodMap(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setFrameShape(QGraphicsView.Shape.NoFrame)
-        self.setBackgroundBrush(QBrush(QColor("#0e1424")))
+        self.setBackgroundBrush(QBrush(NIGHT_BG))
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
@@ -393,6 +388,7 @@ class MoodMap(QGraphicsView):
         self._lod_timer.setSingleShot(True)
         self._lod_timer.setInterval(LOD_DEFER_MS)
         self._lod_timer.timeout.connect(self._flush_zoom_lod)
+        self._sky_bg = None
         self._draw_backdrop()
         self._field = QGraphicsPixmapItem()
         self._field.setZValue(5)
@@ -453,63 +449,25 @@ class MoodMap(QGraphicsView):
         self._gpu_enabled = False
 
     def _draw_backdrop(self) -> None:
+        """Full-bleed violet night. Axis labels and the playlist legend live off the sky."""
         for item in self._sky_chrome:
             self._scene.removeItem(item)
         self._sky_chrome.clear()
-        rect = QRectF(40, 36, 720, 524)
-        panel = self._scene.addRect(rect, QPen(QColor("#1f2a44"), 1.2), QBrush(QColor("#121a2e")))
-        panel.setZValue(0)
-        self._sky_chrome.append(panel)
-        for i in range(1, 4):
-            y = 36 + 524 * i / 4
-            line = self._scene.addLine(40, y, 760, y, QPen(QColor(255, 255, 255, 18), 1))
-            line.setZValue(1)
-            self._sky_chrome.append(line)
-            x = 40 + 720 * i / 4
-            v = self._scene.addLine(x, 36, x, 560, QPen(QColor(255, 255, 255, 18), 1))
-            v.setZValue(1)
-            self._sky_chrome.append(v)
-        font = sans(11)
-        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.0)
-        for x, y, text in ((400, 22, "KINETIC  ↑"), (400, 582, "STILL  ↓")):
-            item = self._scene.addSimpleText(text, font)
-            item.setBrush(QBrush(QColor("#8b95ad")))
-            item.setPos(x - item.boundingRect().width() / 2, y - 8)
-            item.setZValue(2)
-            self._sky_chrome.append(item)
-        for x, y, text, angle in ((16, 298, "SHADOW", -90), (784, 298, "GLOW", 90)):
-            item = self._scene.addSimpleText(text, font)
-            item.setBrush(QBrush(QColor("#8b95ad")))
-            br = item.boundingRect()
-            item.setTransformOriginPoint(br.center())
-            item.setRotation(angle)
-            item.setPos(x - br.width() / 2, y - br.height() / 2)
-            item.setZValue(2)
-            self._sky_chrome.append(item)
-        glow = QRadialGradient(400, 300, 280)
-        glow.setColorAt(0.0, QColor(110, 200, 197, 28))
-        glow.setColorAt(1.0, QColor(0, 0, 0, 0))
-        path = QPainterPath()
-        path.addEllipse(QPointF(400, 300), 280, 220)
-        gitem = self._scene.addPath(path, QPen(Qt.PenStyle.NoPen), QBrush(glow))
-        gitem.setZValue(1)
-        self._sky_chrome.append(gitem)
-        legend_x = 52
-        legend_y = 48
-        font_l = sans(11, medium=True)
-        font_l.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.6)
-        for q in (Quadrant.NOW, Quadrant.DEEP, Quadrant.FILL, Quadrant.SHELF):
-            dot = self._scene.addEllipse(
-                legend_x, legend_y, 8, 8, QPen(Qt.PenStyle.NoPen), QBrush(PLAYLIST_QCOLOR[q])
-            )
-            dot.setZValue(4)
-            self._sky_chrome.append(dot)
-            label = self._scene.addSimpleText(q.value.upper(), font_l)
-            label.setBrush(QBrush(PLAYLIST_QCOLOR[q]))
-            label.setPos(legend_x + 12, legend_y - 3)
-            label.setZValue(4)
-            self._sky_chrome.append(label)
-            legend_x += 78
+        if self._sky_bg is not None:
+            self._scene.removeItem(self._sky_bg)
+            self._sky_bg = None
+        sky = QRadialGradient(SCENE_W * 0.5, SCENE_H * 0.48, SCENE_W * 0.78)
+        sky.setColorAt(0.0, QColor("#1b0c32"))
+        sky.setColorAt(0.55, QColor("#11071c"))
+        sky.setColorAt(1.0, QColor("#07010f"))
+        item = self._scene.addRect(
+            QRectF(0, 0, SCENE_W, SCENE_H),
+            QPen(Qt.PenStyle.NoPen),
+            QBrush(sky),
+        )
+        item.setZValue(0)
+        item.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self._sky_bg = item
 
     def mood_to_pos(self, valence: float, energy: float) -> QPointF:
         return QPointF(40 + valence * 720, 560 - energy * 524)
@@ -600,18 +558,8 @@ class MoodMap(QGraphicsView):
         painter.scale(FIELD_SCALE, FIELD_SCALE)
         painter.setPen(Qt.PenStyle.NoPen)
         n_ranked = len(self._ranked)
-        # Large libraries: keep a readable minimum radius and brighten stacked cores
-        # instead of shrinking stars into invisibility (was 0.55 above 2500).
-        if n_ranked > 2500:
-            base_scale = 0.72
-            density_mode = True
-        elif n_ranked > 1200:
-            base_scale = 0.80
-            density_mode = True
-        else:
-            base_scale = 0.85
-            density_mode = False
-        low_alpha = min(210, LOW_TRUST_ALPHA + 45) if density_mode else LOW_TRUST_ALPHA
+        # Large libraries: a soft milky-way knot instead of shrinking stars away.
+        density_mode = n_ranked > 1200
 
         # Draw lower-confidence stars first so bright / high-trust read on top.
         def _conf_band(r: RankedTrack) -> int:
@@ -631,7 +579,7 @@ class MoodMap(QGraphicsView):
                 STAR_Z[r.quadrant] + (2 if r.track.loved else 0),
             ),
         )
-        # Cheap density underlay so stacked cohorts read as bright regions, not emptiness.
+        # Cheap density underlay so stacked cohorts read as a faint cloud, not emptiness.
         if density_mode and n_ranked:
             cell = 10.0
             counts: dict[tuple[int, int], int] = {}
@@ -643,51 +591,44 @@ class MoodMap(QGraphicsView):
                 if count < 3:
                     continue
                 # log2 so a 500-stack glows without blowing out the whole map.
-                alpha = min(100, 18 + int(22 * log2(count)))
-                glow = QColor(160, 178, 220, alpha)
+                alpha = min(72, 12 + int(14 * log2(count)))
+                glow = QColor(176, 156, 220, alpha)
                 painter.setBrush(QBrush(glow))
-                radius = 5.0 + min(12.0, count * 0.08)
+                radius = 4.0 + min(10.0, count * 0.05)
                 painter.drawEllipse(
                     QPointF(cx * cell + cell * 0.5, cy * cell + cell * 0.5),
                     radius,
                     radius,
                 )
+        link_pen = QPen(QColor(206, 196, 230, 64))
+        link_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+        for ax, ay, bx, by, dist in self._constellation_segments():
+            span = SKY_LINK_MAX - SKY_LINK_MIN
+            fade = (dist - SKY_LINK_MIN) / span if span else 0.0
+            link_pen.setColor(QColor(186, 178, 214, int(54 - 18 * fade)))
+            link_pen.setWidthF(0.55 if dist < 52 else 0.4)
+            painter.setPen(link_pen)
+            painter.drawLine(QPointF(ax, ay), QPointF(bx, by))
+        painter.setPen(Qt.PenStyle.NoPen)
         for item in order:
             pos = self._positions[item.track.id]
-            r = STAR_RADIUS[item.quadrant] * base_scale
-            if item.track.loved:
-                r += 0.5
-            if item.track.pinned:
-                r += 0.45
-            band = _conf_band(item)
-            if item.track.id == self._current_id:
-                color = QColor("#ffffff")
-                r += 0.6
-            elif band == 0:
-                color = QColor(LOW_TRUST_QCOLOR)
-                color.setAlpha(low_alpha)
-                r *= 0.85
-            elif band == 1:
-                color = QColor(PLAYLIST_QCOLOR[item.quadrant])
-                color.setAlpha(MID_CONFIDENCE_ALPHA)
-                r *= 0.92
-            else:
-                color = QColor(PLAYLIST_QCOLOR[item.quadrant])
-            # Floor radius so large-library stacks stay pickable at default zoom.
-            r = max(r, 3.2 if density_mode else 2.6)
-            painter.setPen(Qt.PenStyle.NoPen)
+            radius, color, bloom = self._night_star(item, density_mode)
+            if bloom:
+                painter.setBrush(QBrush(QColor(226, 216, 255, bloom)))
+                painter.drawEllipse(pos, radius * 3.4, radius * 3.4)
             painter.setBrush(QBrush(color))
-            painter.drawEllipse(pos, r, r)
+            painter.drawEllipse(pos, radius, radius)
             # Lock ring + tack so pins read on the baked sky (not only live LOD).
             if item.track.pinned:
-                ring = QPen(PIN_RING_QCOLOR, 1.35)
+                ring = QPen(PIN_RING_QCOLOR, 1.05)
                 painter.setPen(ring)
                 painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
-                painter.drawEllipse(pos, r + 2.4, r + 2.4)
+                painter.drawEllipse(pos, radius + 2.2, radius + 2.2)
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(QBrush(PIN_RING_QCOLOR))
                 painter.drawEllipse(
-                    QPointF(pos.x(), pos.y() - r - 3.2),
+                    QPointF(pos.x(), pos.y() - radius - 2.6),
                     PIN_HEAD_RADIUS * 0.85,
                     PIN_HEAD_RADIUS * 0.85,
                 )
@@ -698,6 +639,97 @@ class MoodMap(QGraphicsView):
         self._field.setPos(0, 0)
         self._field.setVisible(True)
         self._field_sig = self._field_signature()
+
+    def _night_star(self, item: RankedTrack, density: bool) -> tuple[float, QColor, int]:
+        """Scene-pixel radius, moonlight color, and bloom alpha for one baked star."""
+        mag = ((item.track.id * 2654435761) & 0xFFFF) / 65535.0
+        if item.track.pinned:
+            band = 2
+        else:
+            conf = float(getattr(item.track, "mood_confidence", 0.5) or 0.5)
+            if conf >= CONFIDENCE_HIGH:
+                band = 2
+            elif conf >= CONFIDENCE_LOW:
+                band = 1
+            else:
+                band = 0
+        bloom = 0
+        if item.track.id == self._current_id:
+            radius, alpha, bloom = 2.55, 255, 78
+            color = QColor(255, 252, 255, alpha)
+        elif band == 0:
+            radius = 0.62 + mag * 0.42
+            color = QColor(186, 176, 214, 78 + int(mag * 64))
+        elif band == 1:
+            radius = 0.8 + mag * 0.62
+            bloom = 24 if mag > 0.9 else 0
+            color = QColor(230, 224, 255, 150 + int(mag * 70))
+        else:
+            radius = 0.95 + mag * 0.85
+            if mag > 0.93:
+                radius = 2.15
+                bloom = 64
+            elif mag > 0.78:
+                bloom = 26
+            color = QColor(255, 250, 255, 205 + int(mag * 50))
+        if item.track.loved and item.track.id != self._current_id:
+            radius += 0.28
+            color = QColor(255, 246, 228, color.alpha())
+        if item.track.pinned and item.track.id != self._current_id:
+            radius += 0.2
+            bloom = max(bloom, 34)
+        if density:
+            radius = max(0.85, radius * 0.82)
+        return radius, color, bloom
+
+    def _constellation_segments(self) -> list[tuple[float, float, float, float, float]]:
+        """Sparse nearest-neighbor links, as (x1, y1, x2, y2, distance)."""
+        positions = self._positions
+        if len(positions) < 2:
+            return []
+        grid = self._star_grid
+        cell = CLUSTER_GRID
+        span = int(SKY_LINK_MAX // cell) + 1
+        seen: set[tuple[int, int]] = set()
+        segments: list[tuple[float, float, float, float, float]] = []
+        for tid, pos in positions.items():
+            cx0 = int(pos.x() // cell)
+            cy0 = int(pos.y() // cell)
+            candidates: list[tuple[float, int, QPointF]] = []
+            for gx in range(cx0 - span, cx0 + span + 1):
+                for gy in range(cy0 - span, cy0 + span + 1):
+                    bucket = grid.get((gx, gy))
+                    if not bucket:
+                        continue
+                    scan = bucket if len(bucket) <= SKY_LINK_CELL_CAP else bucket[:SKY_LINK_CELL_CAP]
+                    for other, other_pos in scan:
+                        if other == tid:
+                            continue
+                        dist = hypot(other_pos.x() - pos.x(), other_pos.y() - pos.y())
+                        if dist < SKY_LINK_MIN or dist > SKY_LINK_MAX:
+                            continue
+                        candidates.append((dist, other, other_pos))
+            candidates.sort()
+            nearest: list[tuple[float, int, QPointF]] = []
+            bearings: list[float] = []
+            for dist, other, other_pos in candidates:
+                if len(nearest) >= SKY_LINK_K:
+                    break
+                bearing = atan2(other_pos.y() - pos.y(), other_pos.x() - pos.x())
+                if any(
+                    abs((bearing - prev + pi) % (2 * pi) - pi) < SKY_LINK_ANGLE
+                    for prev in bearings
+                ):
+                    continue
+                nearest.append((dist, other, other_pos))
+                bearings.append(bearing)
+            for dist, other, other_pos in nearest:
+                edge = (tid, other) if tid < other else (other, tid)
+                if edge in seen:
+                    continue
+                seen.add(edge)
+                segments.append((pos.x(), pos.y(), other_pos.x(), other_pos.y(), dist))
+        return segments
 
     def _rebuild_star_grid(self) -> None:
         grid: dict[tuple[int, int], list[tuple[int, QPointF]]] = {}
