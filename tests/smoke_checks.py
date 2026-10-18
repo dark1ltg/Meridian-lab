@@ -1001,6 +1001,14 @@ def check_mood_map_helpers() -> None:
     weak_star = TrackStar(weak_ranked)
     assert not weak_star._pin_ring.isVisible()
     assert weak_star.opacity() < 1.0
+    assert weak_star.rect().width() >= 4.0
+    fill = weak_star.brush().color()
+    from meridian.ui.palette import LOW_TRUST_QCOLOR, PLAYLIST_QCOLOR
+
+    def _rgb_dist(a, b) -> float:
+        return (a.red() - b.red()) ** 2 + (a.green() - b.green()) ** 2 + (a.blue() - b.blue()) ** 2
+
+    assert _rgb_dist(fill, LOW_TRUST_QCOLOR) < _rgb_dist(fill, PLAYLIST_QCOLOR[Quadrant.SHELF])
     assert "weak guess" in (weak_star.toolTip() or "").lower()
 
 

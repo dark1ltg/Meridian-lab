@@ -33,7 +33,7 @@ from meridian.queue_engine import QUADRANT_TITLE, Quadrant, RankedTrack
 from meridian.ui.fonts import sans
 from meridian.features import CONFIDENCE_HIGH, CONFIDENCE_LOW
 from meridian.ui.palette import (
-    LOW_CONFIDENCE_OPACITY,
+    LOW_TRUST_QCOLOR,
     MID_CONFIDENCE_OPACITY,
     PIN_HEAD_RADIUS,
     PIN_RING_QCOLOR,
@@ -43,16 +43,68 @@ from meridian.ui.palette import (
     STAR_Z,
 )
 
-# Night sky. Star hue is the matrix queue the lens is pulling that song into.
+# Night sky. Sure stars use the matrix queue hue. A weak guess stays pewter,
+# with only a little of that hue, so trust and playlist can both be read.
+LOVED_RING_QCOLOR = QColor("#fff4c2")
+# Readable at fit-to-widget, still smaller than the old ~6px playlist coin.
+STAR_BODY_SCALE = 0.50
+STAR_BODY_FLOOR = 2.45
+STAR_BODY_FLOOR_DENSE = 2.15
+
+
+def _star_mag(track_id: int) -> float:
+    return ((track_id * 2654435761) & 0xFFFF) / 65535.0
 
 
 def queue_star_color(quadrant: Quadrant, *, loved: bool, band: int) -> QColor:
-    """Playlist hue. Dimmer bands stay the same color so the queue is still readable."""
-    color = QColor(PLAYLIST_QCOLOR[quadrant])
-    if loved and band > 0:
+    """Playlist hue for a sure star. Low trust leans pewter so it is not just a dim neon."""
+    playlist = QColor(PLAYLIST_QCOLOR[quadrant])
+    if band <= 0:
+        pewter = QColor(LOW_TRUST_QCOLOR)
+        color = QColor(
+            int(pewter.red() * 0.72 + playlist.red() * 0.28),
+            int(pewter.green() * 0.72 + playlist.green() * 0.28),
+            int(pewter.blue() * 0.72 + playlist.blue() * 0.28),
+        )
+        color.setAlpha(210)
+        return color
+    color = playlist
+    if loved:
         color = color.lighter(118)
-    color.setAlpha((140, 205, 250)[band])
+    color.setAlpha(250 if band >= 2 else 220)
     return color
+
+
+def night_body_radius(
+    quadrant: Quadrant,
+    *,
+    band: int,
+    mag: float,
+    loved: bool,
+    pinned: bool,
+    current: bool,
+    density: bool,
+) -> float:
+    """Scene-pixel radius. Large libraries stay visible without turning back into coins."""
+    radius = STAR_RADIUS[quadrant] * STAR_BODY_SCALE * (0.86 + 0.22 * mag)
+    if band <= 0:
+        radius *= 0.90
+    elif band >= 2:
+        radius *= 1.06
+    if loved:
+        radius += 0.35
+    if pinned:
+        radius += 0.28
+    if current:
+        radius = max(radius, 3.5)
+    if density:
+        radius *= 0.94
+    floor = STAR_BODY_FLOOR_DENSE if density else STAR_BODY_FLOOR
+    if band <= 0:
+        floor *= 0.92
+    return max(floor, radius)
+
+
 NIGHT_BG = QColor("#07010f")
 SKY_LINK_K = 3
 SKY_LINK_MIN = 14.0
@@ -139,13 +191,6 @@ class TrackStar(QGraphicsEllipseItem):
 
     def apply_style(self, ranked: RankedTrack, current: bool) -> None:
         self.ranked = ranked
-        # Pinprick bodies. Zoom supplies the size; a 6px coin reads as a UI dot, not a star.
-        r = STAR_RADIUS[ranked.quadrant] * 0.36
-        if ranked.track.loved:
-            r += 0.28
-        if ranked.track.pinned:
-            r += 0.22
-        self.setRect(-r, -r, r * 2, r * 2)
         conf = float(getattr(ranked.track, "mood_confidence", 0.5) or 0.5)
         # Pins are locked truth — always draw as high-trust body color.
         if ranked.track.pinned or current:
@@ -156,13 +201,25 @@ class TrackStar(QGraphicsEllipseItem):
             band = "mid"
         else:
             band = "low"
-
         band_n = {"low": 0, "mid": 1, "high": 2}[band]
+        # Same body as the baked sky: visible at fit zoom, not a 6px coin.
+        r = night_body_radius(
+            ranked.quadrant,
+            band=band_n,
+            mag=_star_mag(ranked.track.id),
+            loved=bool(ranked.track.loved),
+            pinned=bool(ranked.track.pinned),
+            current=current,
+            density=False,
+        )
+        self.setRect(-r, -r, r * 2, r * 2)
         color = queue_star_color(ranked.quadrant, loved=bool(ranked.track.loved), band=band_n)
         if current:
             color.setAlpha(255)
+        # Pewter is the trust signal. A light opacity ease keeps a weak guess quieter
+        # without the old half-opacity cut that hid the body.
         if band == "low":
-            self.setOpacity(LOW_CONFIDENCE_OPACITY)
+            self.setOpacity(0.9)
         elif band == "mid":
             self.setOpacity(MID_CONFIDENCE_OPACITY)
         else:
@@ -179,7 +236,9 @@ class TrackStar(QGraphicsEllipseItem):
             self.setPen(QPen(Qt.PenStyle.NoPen))
             self.setZValue(STAR_Z[ranked.quadrant] + 3)
         elif ranked.track.loved:
-            self.setPen(QPen(Qt.PenStyle.NoPen))
+            pen = QPen(LOVED_RING_QCOLOR, 1.35)
+            pen.setCosmetic(True)
+            self.setPen(pen)
             self.setZValue(STAR_Z[ranked.quadrant] + 1)
         elif band == "low":
             self.setPen(QPen(Qt.PenStyle.NoPen))
@@ -235,7 +294,7 @@ class TrackStar(QGraphicsEllipseItem):
         self._label.setPos(-br.width() / 2, r + (8 if pinned else 4))
         label_ink = QColor(PLAYLIST_QCOLOR[ranked.quadrant])
         if band == "low":
-            label_ink = label_ink.darker(130)
+            label_ink = QColor("#9AA8C0")
         elif current or pinned:
             label_ink = label_ink.lighter(140)
         self._label.setBrush(QBrush(label_ink))
@@ -702,6 +761,13 @@ class MoodMap(QGraphicsView):
                 painter.drawEllipse(pos, radius * 3.4, radius * 3.4)
             painter.setBrush(QBrush(color))
             painter.drawEllipse(pos, radius, radius)
+            # Warm ring so a loved star still reads on the baked sky, not only when zoomed in.
+            if item.track.loved and not item.track.pinned and item.track.id != self._current_id:
+                loved_ring = QPen(LOVED_RING_QCOLOR, 1.2)
+                painter.setPen(loved_ring)
+                painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+                painter.drawEllipse(pos, radius + 1.35, radius + 1.35)
+                painter.setPen(Qt.PenStyle.NoPen)
             # Lock ring + tack so pins read on the baked sky (not only live LOD).
             if item.track.pinned:
                 ring = QPen(PIN_RING_QCOLOR, 1.05)
@@ -725,8 +791,8 @@ class MoodMap(QGraphicsView):
 
     def _night_star(self, item: RankedTrack, density: bool) -> tuple[float, QColor, int]:
         """Scene-pixel radius, matrix color, and bloom alpha for one baked star."""
-        mag = ((item.track.id * 2654435761) & 0xFFFF) / 65535.0
-        if item.track.pinned:
+        mag = _star_mag(item.track.id)
+        if item.track.pinned or item.track.id == self._current_id:
             band = 2
         else:
             conf = float(getattr(item.track, "mood_confidence", 0.5) or 0.5)
@@ -737,29 +803,28 @@ class MoodMap(QGraphicsView):
             else:
                 band = 0
         color = queue_star_color(item.quadrant, loved=bool(item.track.loved), band=band)
+        if item.track.id == self._current_id:
+            color.setAlpha(255)
+        radius = night_body_radius(
+            item.quadrant,
+            band=band,
+            mag=mag,
+            loved=bool(item.track.loved),
+            pinned=bool(item.track.pinned),
+            current=item.track.id == self._current_id,
+            density=density,
+        )
         bloom = 0
         if item.track.id == self._current_id:
-            radius, bloom = 2.7, 78
-            color.setAlpha(255)
-        elif band == 0:
-            radius = 1.05 + mag * 0.35
-        elif band == 1:
-            radius = 1.25 + mag * 0.45
-            bloom = 28 if mag > 0.9 else 0
-        else:
-            radius = 1.4 + mag * 0.55
-            if mag > 0.93:
-                radius = 2.35
-                bloom = 70
-            elif mag > 0.78:
-                bloom = 32
-        if item.track.loved and item.track.id != self._current_id:
-            radius += 0.28
+            bloom = 78
+        elif band >= 2 and mag > 0.93:
+            bloom = 70
+        elif band >= 2 and mag > 0.78:
+            bloom = 32
+        elif band == 1 and mag > 0.9:
+            bloom = 28
         if item.track.pinned and item.track.id != self._current_id:
-            radius += 0.2
             bloom = max(bloom, 34)
-        if density:
-            radius = max(0.85, radius * 0.82)
         return radius, color, bloom
 
     def _constellation_segments(self) -> list[tuple[float, float, float, float, float]]:

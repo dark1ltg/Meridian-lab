@@ -27,6 +27,7 @@ Version stays **1.3.6**. This refresh makes the short listen more honest and the
 - Skimpy re-analyze keeps a prior shape note; seed-only rows don’t get fake high steer; near-floor hiss stays quiet on Glow.
 - Dialogue / slope / pitch-Glow / keyword-undo / dual-window honesty gates fixed so the honesty pack actually fires on real audio.
 - Mood map uses an OpenGL viewport by default. A helper process checks the driver first; if that check fails, the map stays on the software widget. `MERIDIAN_NO_GL=1`, `MERIDIAN_GL=off`, `QT_OPENGL=software`, or `LIBGL_ALWAYS_SOFTWARE=1` keep software.
+- Night-sky stars stay large enough to see at fit zoom, including a big library. A weak guess leans pewter instead of a dimmer neon, and a loved star keeps a warm ring.
 
 ### What’s new (plain English)
 
