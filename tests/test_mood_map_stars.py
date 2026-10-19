@@ -368,9 +368,43 @@ def test_search_blacks_out_the_sky_and_keeps_the_match(qapp) -> None:
     view.set_search_query("alpha")
     assert view._field.opacity() < 0.2
     assert view._search_ids == {1}
+    assert not view._flare.pixmap().isNull()
     view.set_search_query("")
     assert view._field.opacity() > 0.9
     assert view._search_ids == set()
+    assert view._flare.pixmap().isNull()
+
+
+def test_filename_search_flares_the_song(qapp) -> None:
+    view = MoodMap()
+    view.resize(480, 360)
+    view.set_tracks(
+        [_ranked(_track(1, title="Nope", path="/music/rarefolder/clip.mp3"))],
+        None,
+    )
+    view.set_search_query("rarefolder")
+    assert view._search_ids == {1}
+    assert view._field.opacity() < 0.2
+
+
+def test_first_sky_does_not_ripple_a_song_already_loaded(qapp) -> None:
+    view = MoodMap()
+    view.resize(480, 360)
+    view.set_tracks([_ranked(_track(1, valence=0.4, energy=0.5))], 1)
+    assert view._ripple_origin is None
+
+
+def test_heartbeat_follows_playback_not_a_loaded_song(qapp) -> None:
+    view = MoodMap()
+    view.resize(480, 360)
+    view.set_tracks([_ranked(_track(1))], 1)
+    assert not view._life_timer.isActive()
+    view.set_playing(True)
+    assert view._life_timer.isActive()
+    assert view._pulse_rect() is not None
+    assert view._pulse_rect().width() < 80
+    view.set_playing(False)
+    assert not view._life_timer.isActive()
 
 
 def test_playing_a_star_starts_a_ripple(qapp) -> None:
@@ -391,8 +425,21 @@ def test_zooming_home_from_close_in_falls_back(qapp) -> None:
     view = MoodMap()
     view.resize(480, 360)
     view.show()
-    view._user_zoom = 4.0
+    view.set_tracks(
+        [
+            _ranked(_track(1, valence=0.4, energy=0.5)),
+            _ranked(_track(2, valence=0.7, energy=0.3)),
+        ],
+        1,
+    )
+    view._user_zoom = 6.0
+    view._lod_band = -1
+    view._sync_live_stars(force=True)
+    assert view._field.opacity() < 0.5
     view.reset_view()
     assert view._falling
-    view._fall_timer.stop()
-    view._falling = False
+    assert view._field.opacity() == 1.0
+    assert not any(star.isVisible() for star in view._stars.values())
+    view.reset_view()
+    assert not view._falling
+    assert view._user_zoom == 1.0

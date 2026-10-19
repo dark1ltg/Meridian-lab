@@ -153,3 +153,18 @@ def test_search_picked_pulls_into_queue(qapp, library: Library) -> None:
     mw_mod.MainWindow._search_picked(stub, 2)
     assert pulls == [2]
     assert "Lens on" in stub._status
+
+
+def test_picking_a_hit_tells_the_sky_the_search_is_over(qapp, library: Library) -> None:
+    queries: list[str] = []
+    ts = TrackSearch(library)
+    ts.query_changed.connect(queries.append)
+    ts.resize(420, 36)
+    ts.show()
+    ts.setFocus()
+    _prepare(ts)
+    queries.clear()
+    QTest.keyClick(ts, Qt.Key.Key_Return)
+    QTest.qWait(40)
+    assert ts.text() == ""
+    assert queries[-1] == ""

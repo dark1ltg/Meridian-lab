@@ -616,6 +616,9 @@ class MoodMap(QGraphicsView):
         self._sky_band = "night"
         self._search_query = ""
         self._search_ids: set[int] = set()
+        self._playing = False
+        self._tracks_shown = False
+        self._life_prev: QRectF | None = None
         self._ripple_origin: QPointF | None = None
         self._ripple_neighbors: list[tuple[QPointF, float]] = []
         self._ripple_start = 0.0
@@ -688,6 +691,11 @@ class MoodMap(QGraphicsView):
         self._lens_color.setShapeMode(QGraphicsPixmapItem.ShapeMode.BoundingRectShape)
         self._lens_color.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         self._scene.addItem(self._lens_color)
+        self._flare = QGraphicsPixmapItem()
+        self._flare.setZValue(5.82)
+        self._flare.setShapeMode(QGraphicsPixmapItem.ShapeMode.BoundingRectShape)
+        self._flare.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self._scene.addItem(self._flare)
         self._life = SkyLifeOverlay()
         self._life._host = self
         self._scene.addItem(self._life)
@@ -883,15 +891,19 @@ class MoodMap(QGraphicsView):
         self._refresh_route()
         self._lod_band = -1
         self._sync_live_stars(force=True)
+        # The first draw can already have a song loaded. That is not a new play.
         if (
-            current_id is not None
+            self._tracks_shown
+            and current_id is not None
             and current_id != previous
             and current_id in self._positions
         ):
             self._begin_ripple(current_id)
+        self._tracks_shown = True
         if self._search_query:
             self._rematch_search()
             self._apply_search_veil()
+        self._rebuild_search_flares()
         self._arm_life()
 
     def set_sky_band(self, band: str) -> None:
@@ -922,6 +934,7 @@ class MoodMap(QGraphicsView):
         if self._ranked:
             self._refresh_lens_colors()
             self._refresh_route()
+        self._rebuild_search_flares()
         self._arm_life()
 
     def _rematch_search(self) -> None:
@@ -931,7 +944,7 @@ class MoodMap(QGraphicsView):
             return
         for item in self._ranked.values():
             track = item.track
-            blob = f"{track.title}\n{track.artist}\n{track.album}".lower()
+            blob = f"{track.title}\n{track.artist}\n{track.album}\n{track.path}".lower()
             if query in blob:
                 self._search_ids.add(track.id)
 
@@ -955,6 +968,77 @@ class MoodMap(QGraphicsView):
                 if abs(star.scale() - 1.0) > 0.02:
                     star.setScale(1.0)
 
+    def set_playing(self, playing: bool) -> None:
+        """The heartbeat follows sound, not merely which song is loaded."""
+        playing = bool(playing)
+        if playing == self._playing:
+            return
+        self._playing = playing
+        self._arm_life()
+
+    def _rebuild_search_flares(self) -> None:
+        """Bake match flares once. A broad search must not redraw them every frame."""
+        if not self._search_query or not self._search_ids:
+            self._flare.setPixmap(QPixmap())
+            self._flare.hide()
+            return
+        image = QImage(SCENE_W, SCENE_H, QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(Qt.PenStyle.NoPen)
+        for tid in self._search_ids:
+            pos = self._positions.get(tid)
+            item = self._ranked.get(tid)
+            if pos is None or item is None:
+                continue
+            radius, color, _bloom = self._night_star(item, False)
+            flare = QColor(color)
+            flare.setAlpha(90)
+            painter.setBrush(QBrush(flare))
+            painter.drawEllipse(pos, radius * 7.5, radius * 7.5)
+            hot = QColor(255, 248, 236, 235)
+            painter.setBrush(QBrush(hot))
+            painter.drawEllipse(pos, max(2.4, radius * 1.2), max(2.4, radius * 1.2))
+        painter.end()
+        self._flare.setPixmap(QPixmap.fromImage(image))
+        self._flare.setPos(0, 0)
+        self._flare.show()
+
+    def _pulse_rect(self) -> QRectF | None:
+        if not self._playing or self._current_id is None:
+            return None
+        pos = self._positions.get(self._current_id)
+        item = self._ranked.get(self._current_id)
+        if pos is None or item is None:
+            return None
+        radius, _color, _bloom = self._night_star(item, False)
+        pad = radius * 5.2 + 6.0
+        return QRectF(pos.x() - pad, pos.y() - pad, pad * 2.0, pad * 2.0)
+
+    def _ripple_rect(self) -> QRectF | None:
+        if self._ripple_origin is None or monotonic() >= self._ripple_until:
+            return None
+        reach = 170.0
+        origin = self._ripple_origin
+        return QRectF(origin.x() - reach, origin.y() - reach, reach * 2.0, reach * 2.0)
+
+    def _invalidate_life(self) -> None:
+        """Redraw only the pulse and the ripple, not the whole sky."""
+        pulse = self._pulse_rect()
+        ripple = self._ripple_rect()
+        current: QRectF | None = None
+        if pulse is not None:
+            current = pulse
+        if ripple is not None:
+            current = ripple if current is None else current.united(ripple)
+        previous = self._life_prev
+        self._life_prev = current
+        if current is None and previous is None:
+            return
+        dirty = current if previous is None else previous if current is None else current.united(previous)
+        self._life.update(dirty)
+
     def _begin_ripple(self, track_id: int) -> None:
         origin = self._positions.get(track_id)
         if origin is None:
@@ -973,37 +1057,26 @@ class MoodMap(QGraphicsView):
         self._ripple_until = self._ripple_start + 0.62
 
     def _arm_life(self) -> None:
-        alive = bool(self._current_id) or bool(self._search_query) or monotonic() < self._ripple_until
-        if alive:
+        pulsing = self._playing and self._current_id is not None
+        rippling = monotonic() < self._ripple_until
+        if pulsing or rippling:
             if not self._life_timer.isActive():
                 self._life_timer.start()
         else:
             self._life_timer.stop()
-        self._life.update()
+        self._invalidate_life()
 
     def _tick_life(self) -> None:
-        if not self._current_id and not self._search_query and monotonic() >= self._ripple_until:
+        pulsing = self._playing and self._current_id is not None
+        rippling = monotonic() < self._ripple_until
+        if not pulsing and not rippling:
             self._life_timer.stop()
-        self._life.update()
+        self._invalidate_life()
 
     def paint_sky_life(self, painter: QPainter) -> None:
-        """Pulse, ripple, and search flares. The baked field stays still."""
+        """Pulse and ripple. Search flares are a still picture, not this animation."""
         now = monotonic()
         painter.setPen(Qt.PenStyle.NoPen)
-        if self._search_query:
-            for tid in self._search_ids:
-                pos = self._positions.get(tid)
-                item = self._ranked.get(tid)
-                if pos is None or item is None:
-                    continue
-                radius, color, _bloom = self._night_star(item, False)
-                flare = QColor(color)
-                flare.setAlpha(90)
-                painter.setBrush(QBrush(flare))
-                painter.drawEllipse(pos, radius * 7.5, radius * 7.5)
-                hot = QColor(255, 248, 236, 235)
-                painter.setBrush(QBrush(hot))
-                painter.drawEllipse(pos, max(2.4, radius * 1.2), max(2.4, radius * 1.2))
         if self._ripple_origin is not None and now < self._ripple_until:
             span = max(0.001, self._ripple_until - self._ripple_start)
             age = now - self._ripple_start
@@ -1022,7 +1095,7 @@ class MoodMap(QGraphicsView):
                 painter.setBrush(QBrush(QColor(255, 255, 255, int(130 * bump))))
                 painter.drawEllipse(pos, 1.5 + 3.0 * bump, 1.5 + 3.0 * bump)
         searching_past = self._search_query and self._current_id not in self._search_ids
-        if self._current_id and not searching_past:
+        if self._playing and self._current_id and not searching_past:
             pos = self._positions.get(self._current_id)
             item = self._ranked.get(self._current_id)
             if pos is not None and item is not None:
@@ -1463,6 +1536,10 @@ class MoodMap(QGraphicsView):
         self._end_zoom_interaction()
         self._cluster_once = True
         if self._falling:
+            # A second ask finishes the trip home instead of waiting it out.
+            self._fall_timer.stop()
+            self._falling = False
+            self._settle_home()
             return
         if self._user_zoom <= VIEW_ZOOM_MIN + 0.05:
             self._settle_home()
@@ -1470,6 +1547,7 @@ class MoodMap(QGraphicsView):
         self._fall_from = self._user_zoom
         self._fall_t = 0.0
         self._falling = True
+        self._present_home_sky()
         self._fall_timer.start()
 
     def _settle_home(self) -> None:
@@ -1501,6 +1579,25 @@ class MoodMap(QGraphicsView):
         self.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
         self.scale(self._user_zoom, self._user_zoom)
         self.centerOn(center)
+        if self._search_query:
+            self._apply_search_veil()
+        else:
+            self._update_chrome(self._user_zoom)
+
+    def _present_home_sky(self) -> None:
+        """Show the whole baked sky while zooming home, so the end does not blink."""
+        locked = self._drag_locked_ids()
+        for tid, star in self._stars.items():
+            if tid in locked:
+                continue
+            star.hide()
+            if abs(star.scale() - 1.35) < 0.05:
+                star.setScale(1.0)
+        self._field.setOpacity(1.0)
+        self._lens_color.setOpacity(1.0)
+        self._route.setOpacity(1.0)
+        self._update_chrome(self._user_zoom)
+        self._apply_search_veil()
 
     def _apply_base_fit(self) -> None:
         center = self.mapToScene(self.viewport().rect().center())
@@ -1568,6 +1665,9 @@ class MoodMap(QGraphicsView):
 
     def _sync_live_stars(self, *, force: bool = False) -> None:
         """Sky = baked field only. Zoomed in = sparse live stars in the viewport."""
+        if self._falling:
+            self._present_home_sky()
+            return
         zoom = self._user_zoom
         band = int(zoom * 4)
         if not force and band == self._lod_band:

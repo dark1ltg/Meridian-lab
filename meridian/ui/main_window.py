@@ -431,6 +431,8 @@ class MainWindow(QMainWindow):
         self.player.position_changed.connect(self._pos)
         self.player.duration_changed.connect(self._dur)
         self.player.state_changed.connect(self.transport.set_playing)
+        self.player.state_changed.connect(self.map.set_playing)
+        self.map.set_playing(self.player.is_playing())
         self.player.track_nearly_finished.connect(self._nearly_finished)
         self.player.track_finished.connect(self._track_finished_hard)
         self.player.crossfade_settled.connect(self._crossfade_settled)

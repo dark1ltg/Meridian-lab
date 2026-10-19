@@ -233,5 +233,7 @@ class TrackSearch(QLineEdit):
             self._hits = []
             self._label_to_id = {}
             self._model.setStringList([])
+            # clear() ran with signals blocked, so the sky never saw the box empty.
+            self.query_changed.emit("")
         finally:
             self._emitting = False

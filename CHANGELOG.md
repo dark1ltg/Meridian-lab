@@ -32,6 +32,7 @@ Version stays **1.3.6**. This refresh makes the short listen more honest and the
 - The middle of the night sky is easier to see: a soft cross marks Shadow against Glow and Still against Kinetic.
 - Stars stay white, or pewter when the guess is weak, until the lens covers them. Inside the lens they take the matrix color. The committed queue is a path on the sky, brightest on the song that is playing.
 - The song that is playing pulses. Starting it sends a short ripple through the nearby stars. A search blacks out the rest of the sky and flares the match. Zooming back to the whole sky eases out like falling backward. Night stars stay crisp and daytime stars look hazy. A long song is a larger star and a short one is a speck.
+- Picking a search result restores the sky. A filename match flares too. The pulse only runs while sound is playing, and only that small spot redraws. The first sky draw does not ripple. Zooming home shows the whole sky during the fall, and a second double-click finishes the trip.
 - The context queue rows are stars in play order. The four matrix lists are plain names again, with the colored top edge and subtitle.
 - The quarter grid is gone. The four corners carry colder or warmer light, and diving in fades the constellations and grows a name plus a role chip.
 
