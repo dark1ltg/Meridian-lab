@@ -1,73 +1,61 @@
-> **Experimental playground — not the stable Meridian release line.**
->
-> This repository (`dark1ltg/Meridian-lab`) is a scratch space for Meridian ideas.
-> Expect breakage, rewrites, and abandoned experiments.
->
-> **Open this repo as its own Cursor workspace / Cloud Agent project.** Do not use the Meridian workspace for lab work.
->
-> **Stable releases live in [`dark1ltg/Meridian`](https://github.com/dark1ltg/Meridian).**
-
 # Meridian-lab
 
-[![Release](https://img.shields.io/github/v/release/dark1ltg/Meridian?label=release&color=e8b86d)](https://github.com/dark1ltg/Meridian/releases/latest)
+This folder is the workshop for [Meridian](https://github.com/dark1ltg/Meridian).
 
-**Your library is a night sky. Navigate by feel.**
+Meridian is a music player that lives on your own computer. It does not stream, and it does not ask you to sign in. Your songs stay in your folders. This lab is where new ideas for that player get tried. The everyday app, the one with real releases, stays in the other repository.
 
-Meridian-lab tracks the Meridian codebase for experiments. Upstream Meridian is a local, offline Linux music player. Every track becomes a star on a mood map — **Shadow → Glow**, **Still → Kinetic**. Aim a lens where you want to be, and a context queue builds from that neighborhood. No accounts. No streaming. Your files stay on your disk.
+Ideas here can break, change shape, or get thrown away. That is what the workshop is for.
 
-![Meridian overview](docs/screenshots/01-overview.png)
+![A look at the player](docs/screenshots/01-overview.png)
 
 <p align="center">
-  <img src="docs/screenshots/02-mood-map.png" alt="Mood map with selection lens" width="48%" />
+  <img src="docs/screenshots/02-mood-map.png" alt="The night sky and the lens" width="48%" />
   &nbsp;
-  <img src="docs/screenshots/03-matrix-queue.png" alt="Listen matrix and context queue" width="48%" />
+  <img src="docs/screenshots/03-matrix-queue.png" alt="The four lists and the queue" width="48%" />
 </p>
 
-## Features
+## What you do with it
 
-- **Mood map** — browse by atmosphere instead of folders; drag the lens, scroll to resize, pinch to zoom
-- **Listen matrix** — nearby tracks sorted into NOW / DEEP / FILL / SHELF
-- **Context queue** — replenishes from the lens, time of day, and listening mode (Focus, Wander, Charge, Dim); **Renew queue** pulls a fresh queue from the current matrix without counting replaced songs as skips
-- **Local analysis** — tags plus a short waveform listen (`ffmpeg`: intro/mid/end on long tracks, shifted past silent heads); optional **aubio** for tempo/onset cues; SSD libraries may listen with two workers at once
-- **Pins & search** — drag a star to lock its mood; search by title, artist, album, or path
-- **Crossfade** — smooth advances while something is already playing
+Your library is drawn as a night sky. Each song is a star.
 
-## Get Meridian
+- Left to right is mood, from shadow to glow.
+- Bottom to top is energy, from still to moving.
 
-### System requirements (AppImage)
+Drag the lens to the part of the sky you feel like. The four lists beside the map fill with the songs under that lens:
 
-**Baseline:** **Ubuntu 24.04 LTS** (or newer) on **x86_64**.
+- **NOW** — play these
+- **DEEP** — stay with this mood
+- **FILL** — songs that fit in between
+- **SHELF** — keep these nearby, not yet
 
-The release AppImage needs **glibc 2.38+** (Ubuntu 24.04 ships **2.39**). Distros with older glibc (for example AlmaLinux 9 / glibc 2.34) will not run it. AlmaLinux 10 (glibc 2.39) matches the baseline.
+When that neighborhood feels right, press **Renew**. That commits the queue. The songs already playing stay put. Replaced songs are not counted as skips.
 
-Also install host **`ffmpeg`** for mood analysis. For H.264 through Qt’s FFmpeg plugin, install system **`x264` / `libx264`** (not bundled). Meridian warns if that library is missing.
+Double-click a star to play it. Drag a star to lock its mood in place. Search finds a title, a person, an album, or a file name.
 
-The mood map uses an OpenGL viewport when the GPU driver can create one. Meridian checks that in a short helper process before the window opens. If the driver errors or the hardware check fails, the map stays on the software widget.
+## What the lab is trying right now
 
-To keep the software map:
+The sky is the experiment. The way you drive it stays the same: move the lens, read the four lists, press Renew when you want a new queue.
 
-```bash
-MERIDIAN_NO_GL=1 ./Meridian-x86_64.AppImage
-# or:
-MERIDIAN_GL=off ./Meridian-x86_64.AppImage
-LIBGL_ALWAYS_SOFTWARE=1 QT_OPENGL=software ./Meridian-x86_64.AppImage
-```
+Stars stay quiet until the lens covers them. Inside the lens they take the color of their list. The committed queue is a path drawn on the sky. The song that is playing pulses. Starting a song sends a short ripple through the songs around it. A search darkens the sky and flares the match. Zooming back out to the whole sky eases away. Night stars look crisp, and daytime stars look a little hazy. A long song is a bigger star. A short one is a speck.
 
-### AppImage (recommended)
+The four lists are plain names. None of this is a promise that the everyday app will look the same.
 
-Download **`Meridian-x86_64.AppImage`** from the [latest release](https://github.com/dark1ltg/Meridian/releases/latest).
+## Keep this workshop separate
+
+Open this folder as its own project. A cloud agent for an experiment should use the **Meridian-lab** repository. Lab branches stay here. The stable Meridian project is a different repo.
+
+How this copy was filled in is written down in [POPULATE.md](POPULATE.md).
+
+## Try it
+
+On a recent Ubuntu-style Linux, the packaged app is `dist/Meridian-x86_64.AppImage` after a build. Older systems may not run that file.
 
 ```bash
 chmod +x Meridian-x86_64.AppImage
-./Meridian-x86_64.AppImage --install    # menu entry + icons under ~/.local/share
-./Meridian-x86_64.AppImage              # or launch from your app menu
+./Meridian-x86_64.AppImage
 ```
 
-`--uninstall` removes the menu entry and icons.
-
-### Run from source
-
-Needs system PySide6 (Qt 6) plus a venv for analysis libraries:
+To run from the source folder, use the system Python with Qt, then:
 
 ```bash
 /usr/bin/python3 -m venv --system-site-packages .venv
@@ -75,67 +63,19 @@ Needs system PySide6 (Qt 6) plus a venv for analysis libraries:
 bash scripts/run.sh
 ```
 
-`aubio` needs the native library (e.g. Arch/CachyOS: `sudo pacman -S aubio`). Without it, Meridian still runs; tempo/onset cues are skipped.
+The player can still start if the tempo library is missing. It just skips that part of the listen. The first launch looks in your Music folder if you have one.
 
-**Add library folder** imports music. `~/Music` is scanned on first launch if it exists. **Rescan** refreshes tags and re-analyzes every track.
+Building the package is `bash packaging/build-appimage.sh` on this machine, or `bash packaging/build-appimage-ubuntu2404.sh` when you want a build that matches Ubuntu 24.04.
 
-### Build the AppImage
+## The everyday app
 
-For the **supported** release-style binary (Ubuntu 24.04 / glibc ≤ 2.39), prefer:
+Downloads and release notes for the stable player: [Meridian releases](https://github.com/dark1ltg/Meridian/releases).
 
-```bash
-bash packaging/build-appimage-ubuntu2404.sh
-# → dist/Meridian-x86_64-ubuntu2404.AppImage  (also Meridian-x86_64.AppImage)
-```
+Deeper notes on this lab, in plain language:
 
-Uses Docker/Podman with `ubuntu:24.04`, or a local Ubuntu 24.04 rootfs via proot when containers are unavailable.
+- [How a song gets a short listen](docs/audio-analysis-pipeline.md)
+- [How that listen becomes a place on the sky](docs/placement-pipeline.md)
+- [Doc index](docs/README.md)
+- [What changed](CHANGELOG.md)
 
-A plain host build may only run on machines as new as your build PC:
-
-```bash
-bash packaging/build-appimage.sh
-./dist/Meridian-$(uname -m).AppImage --install   # optional
-```
-
-## Quick use
-
-| Action | How |
-|---|---|
-| Aim the queue | Drag the lens on the mood map |
-| Resize neighborhood | Scroll on the map |
-| Zoom / pan | Pinch or Ctrl+scroll; drag empty space |
-| Pin a mood | Drag a star |
-| Renew context queue | **Renew queue** on the context-queue panel (new pass from the current matrix) |
-| Play | Double-click a star, matrix row, or queue row; Space plays/pauses |
-| Search | Ctrl+F |
-
-Release history: [CHANGELOG.md](CHANGELOG.md) · [GitHub Releases](https://github.com/dark1ltg/Meridian/releases)
-
-## Documentation
-
-How Meridian works under the hood (plain language):
-
-- [How Meridian listens](docs/audio-analysis-pipeline.md) — the short listen of each track  
-- [How stars get placed](docs/placement-pipeline.md) — sticker + listen → mood map  
-- [Docs index](docs/README.md)
-
-## License
-
-Meridian is free software under the **GNU General Public License v3.0**.  
-See [LICENSE](LICENSE) / [COPYING](COPYING).
-
-Third-party components: [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).  
-Ubuntu fonts ship under the Ubuntu Font Licence 1.0 in `resources/fonts/`.  
-AppImage builds include notices under `usr/share/doc/meridian/` with [SOURCE_OFFER.txt](SOURCE_OFFER.txt).
-
----
-
-## Lab setup status
-
-The working tree matches [`dark1ltg/Meridian`](https://github.com/dark1ltg/Meridian) at `b48f89d2469f691dcbad804a6e48f0bf08ce0bfa` (`master`), plus this lab banner and [POPULATE.md](POPULATE.md). Git history here is still the lab history, not a mirror of upstream commits.
-
-### Open as a separate Cursor Cloud project
-
-1. [cursor.com](https://cursor.com) → Cloud Agents / new project
-2. Connect repo **`dark1ltg/Meridian-lab`** (not Meridian)
-3. Use a dedicated environment so lab experiments never touch Meridian branches
+Meridian is free software under the GNU General Public License v3.0. See [LICENSE](LICENSE).
