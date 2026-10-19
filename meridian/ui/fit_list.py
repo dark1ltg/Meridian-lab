@@ -38,8 +38,10 @@ class _DeadScrollBar(QScrollBar):
 class FitList(QListWidget):
     """Vertical-only list. Long names elide; the horizontal bar never appears."""
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, *, line_extra: int = 0) -> None:
         super().__init__(parent)
+        # Extra pixels on the row. The four matrix lists use this; the queue stays at 0.
+        self._line_extra = max(0, int(line_extra))
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
@@ -57,7 +59,7 @@ class FitList(QListWidget):
         self.model().modelReset.connect(self._clamp_items)
 
     def _row_height(self) -> int:
-        return self.fontMetrics().height() + 12
+        return self.fontMetrics().height() + 12 + self._line_extra
 
     def _clamp_items(self, *_args) -> None:
         width = max(1, self.viewport().width())

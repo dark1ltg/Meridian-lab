@@ -199,6 +199,9 @@ QListWidget::item {
     font-size: 12px;
     font-weight: 400;
 }
+QListWidget#quadList::item {
+    padding: 8px 4px;
+}
 QListWidget::item:selected {
     background: #243049;
     color: #f4f7ff;

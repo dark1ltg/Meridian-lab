@@ -105,7 +105,8 @@ class MatrixCell(QFrame):
         sub.setObjectName("quadSub")
         sub.setWordWrap(False)
         sub.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
-        self.list = FitList()
+        # Two extra pixels above and below each name. The queue list does not use this.
+        self.list = FitList(line_extra=4)
         self.list.setObjectName("quadList")
         self.list.setFont(condensed(12))
         self.list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
