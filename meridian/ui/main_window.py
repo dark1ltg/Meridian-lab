@@ -421,6 +421,7 @@ class MainWindow(QMainWindow):
         self.matrix.track_activated.connect(self._pull_and_play)
         self.queue_list.itemDoubleClicked.connect(self._queue_activated)
         self.search.track_chosen.connect(self._search_picked)
+        self.search.query_changed.connect(self.map.set_search_query)
         self.transport.play_toggled.connect(self.toggle_play)
         self.transport.previous.connect(self.play_prev)
         self.transport.next.connect(self.play_next)
@@ -506,6 +507,10 @@ class MainWindow(QMainWindow):
         self.settings.setValue("ui/renew_explained", True)
         return True
 
+    def _show_band(self, ctx) -> None:
+        self.band_chip.setText(ctx.band_label)
+        self.map.set_sky_band(ctx.band.value)
+
     def _renew_queue(self) -> None:
         """New recommendation pass from the current matrix — not skips, not shuffle."""
         if self._closing or self._rebuild_lock:
@@ -514,7 +519,7 @@ class MainWindow(QMainWindow):
             return
         prior = list(self.session_queue)
         ctx = self.current_context()
-        self.band_chip.setText(ctx.band_label)
+        self._show_band(ctx)
         tracks = self._playable_tracks()
         current_id = self.player.current.id if self.player.current else None
         exempt = set(self.explicit)
@@ -552,7 +557,7 @@ class MainWindow(QMainWindow):
                 self._pending_plan_refresh = True
             return
         ctx = self.current_context()
-        self.band_chip.setText(ctx.band_label)
+        self._show_band(ctx)
         tracks = self._playable_tracks()
         current_id = self.player.current.id if self.player.current else None
         self.plan = build_plan(tracks, ctx, self.explicit)
@@ -1657,7 +1662,7 @@ class MainWindow(QMainWindow):
     def _replenish_queue(self, *, avoid_id: int | None = None) -> None:
         """Build a fresh context queue from lens, time of day, and matrix lists."""
         ctx = self.current_context()
-        self.band_chip.setText(ctx.band_label)
+        self._show_band(ctx)
         # Skip ghost rows whose files are gone so the queue cannot refill with them.
         tracks = self._playable_tracks()
         current_id = self.player.current.id if self.player.current else None

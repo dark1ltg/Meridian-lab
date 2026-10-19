@@ -27,9 +27,12 @@ from meridian.ui.mood_map import (
     MoodMap,
     TrackStar,
     constellation_segments,
+    duration_radius_scale,
+    heartbeat_amount,
     night_body_radius,
     queue_star_color,
     quiet_star_color,
+    sky_haze,
 )
 from meridian.ui.palette import LOW_TRUST_QCOLOR, PLAYLIST_QCOLOR
 
@@ -48,7 +51,7 @@ def _track(i: int, **overrides) -> Track:
         album="",
         albumartist="",
         genre="",
-        duration_ms=1,
+        duration_ms=210_000,
         year=None,
         bpm=None,
         valence=0.4,
@@ -309,3 +312,87 @@ def test_zoomed_star_can_show_a_role_chip(qapp) -> None:
     assert star._label.isVisible()
     assert star._role.isVisible()
     assert star._role.text() == "DEEP"
+
+
+def test_song_length_changes_star_size() -> None:
+    short = night_body_radius(
+        Quadrant.NOW, band=2, mag=0.5, loved=False, pinned=False, current=False, density=False, duration_ms=20_000
+    )
+    usual = night_body_radius(
+        Quadrant.NOW, band=2, mag=0.5, loved=False, pinned=False, current=False, density=False, duration_ms=210_000
+    )
+    long = night_body_radius(
+        Quadrant.NOW, band=2, mag=0.5, loved=False, pinned=False, current=False, density=False, duration_ms=600_000
+    )
+    assert short < usual < long
+    assert duration_radius_scale(None) == 1.0
+    assert short < STAR_BODY_FLOOR
+
+
+def test_heartbeat_is_two_thumps_then_a_rest() -> None:
+    assert heartbeat_amount(0.10) > 0.8
+    assert heartbeat_amount(0.28) > 0.4
+    assert heartbeat_amount(0.7) == 0.0
+
+
+def test_day_band_is_hazier_than_night() -> None:
+    assert sky_haze("night") == 0.0
+    assert sky_haze("day") == 1.0
+    assert sky_haze("dawn") > sky_haze("dusk") > sky_haze("night")
+
+
+def test_day_sky_softens_the_star(qapp) -> None:
+    view = MoodMap()
+    view.resize(480, 360)
+    view.set_tracks([_ranked(_track(1, valence=0.5, energy=0.5, duration_ms=210_000))], None)
+    view.set_sky_band("night")
+    night = view._field.pixmap().toImage()
+    view.set_sky_band("day")
+    day = view._field.pixmap().toImage()
+    pos = view._positions[1]
+    x = int(round(pos.x() * 2)) + 8
+    y = int(round(pos.y() * 2))
+    assert day.pixelColor(x, y).alpha() > night.pixelColor(x, y).alpha()
+
+
+def test_search_blacks_out_the_sky_and_keeps_the_match(qapp) -> None:
+    view = MoodMap()
+    view.resize(480, 360)
+    view.set_tracks(
+        [
+            _ranked(_track(1, title="Alpha", valence=0.3, energy=0.4)),
+            _ranked(_track(2, title="Other", valence=0.7, energy=0.6)),
+        ],
+        None,
+    )
+    view.set_search_query("alpha")
+    assert view._field.opacity() < 0.2
+    assert view._search_ids == {1}
+    view.set_search_query("")
+    assert view._field.opacity() > 0.9
+    assert view._search_ids == set()
+
+
+def test_playing_a_star_starts_a_ripple(qapp) -> None:
+    view = MoodMap()
+    view.resize(480, 360)
+    ranked = [
+        _ranked(_track(1, valence=0.4, energy=0.5)),
+        _ranked(_track(2, valence=0.42, energy=0.52)),
+    ]
+    view.set_tracks(ranked, None)
+    assert view._ripple_origin is None
+    view.set_tracks(ranked, 1)
+    assert view._ripple_origin is not None
+    assert view._ripple_neighbors
+
+
+def test_zooming_home_from_close_in_falls_back(qapp) -> None:
+    view = MoodMap()
+    view.resize(480, 360)
+    view.show()
+    view._user_zoom = 4.0
+    view.reset_view()
+    assert view._falling
+    view._fall_timer.stop()
+    view._falling = False

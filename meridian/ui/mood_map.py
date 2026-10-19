@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from math import atan2, hypot, log2, pi
+from math import atan2, cos, hypot, log2, pi, sin
+from time import monotonic
 
 import numpy as np
 
@@ -97,6 +98,7 @@ def night_body_radius(
     pinned: bool,
     current: bool,
     density: bool,
+    duration_ms: int | None = None,
 ) -> float:
     """Scene-pixel radius. Large libraries stay visible without turning back into coins."""
     radius = STAR_RADIUS[quadrant] * STAR_BODY_SCALE * (0.86 + 0.22 * mag)
@@ -112,10 +114,41 @@ def night_body_radius(
         radius = max(radius, 3.5)
     if density:
         radius *= 0.94
+    span = duration_radius_scale(duration_ms)
+    radius *= span
     floor = STAR_BODY_FLOOR_DENSE if density else STAR_BODY_FLOOR
     if band <= 0:
         floor *= 0.92
+    # A short song may fall below the usual floor so it reads as a speck.
+    if span < 1.0:
+        floor *= span
     return max(floor, radius)
+
+
+def duration_radius_scale(duration_ms: int | None) -> float:
+    """Map length onto star size. About 3.5 minutes stays at 1; shorts shrink, longs grow."""
+    if duration_ms is None or duration_ms <= 0:
+        return 1.0
+    scale = (max(1, duration_ms) / 210_000) ** 0.45
+    return max(0.36, min(1.65, scale))
+
+
+def sky_haze(band: str) -> float:
+    """0 is a crisp night. 1 is a hazy day. Dawn and dusk sit between."""
+    return {"night": 0.0, "dusk": 0.38, "dawn": 0.5, "day": 1.0}.get((band or "night").lower(), 0.0)
+
+
+def heartbeat_amount(phase: float) -> float:
+    """Lub-dub strength, 0 to 1. ``phase`` runs 0..1 across one beat."""
+    phase = phase % 1.0
+
+    def hump(center: float, width: float, height: float) -> float:
+        d = abs(phase - center) / width
+        if d >= 1.0:
+            return 0.0
+        return height * (0.5 + 0.5 * cos(d * pi))
+
+    return hump(0.10, 0.09, 1.0) + hump(0.28, 0.07, 0.62)
 
 
 NIGHT_BG = QColor("#07010f")
@@ -301,6 +334,7 @@ class TrackStar(QGraphicsEllipseItem):
             pinned=bool(ranked.track.pinned),
             current=current,
             density=False,
+            duration_ms=getattr(ranked.track, "duration_ms", None),
         )
         self.setRect(-r, -r, r * 2, r * 2)
         inside = self._inside_lens(ranked)
@@ -319,6 +353,10 @@ class TrackStar(QGraphicsEllipseItem):
             self.setOpacity(MID_CONFIDENCE_OPACITY)
         else:
             self.setOpacity(1.0)
+        host = getattr(self, "_map", None)
+        haze = sky_haze(getattr(host, "_sky_band", "night") if host is not None else "night")
+        if haze > 0.05:
+            self.setOpacity(self.opacity() * (1.0 - 0.28 * haze))
         self.setBrush(QBrush(color))
 
         pinned = bool(ranked.track.pinned)
@@ -370,7 +408,7 @@ class TrackStar(QGraphicsEllipseItem):
             tip += f"\n{note}"
         self.setToolTip(tip)
 
-        glow_r = r * (3.8 if pinned else 3.4)
+        glow_r = r * (3.8 if pinned else 3.4) * (1.0 + 0.55 * haze)
         self._glow.setRect(-glow_r, -glow_r, glow_r * 2, glow_r * 2)
         glow_c = QColor(color)
         if pinned:
@@ -521,6 +559,29 @@ class LensItem(QGraphicsEllipseItem):
         return super().itemChange(change, value)
 
 
+class SkyLifeOverlay(QGraphicsItem):
+    """Heartbeat, play ripple, and search flares. Drawn over the baked sky."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self.setZValue(5.85)
+        self._host: MoodMap | None = None
+
+    def boundingRect(self) -> QRectF:
+        return QRectF(0, 0, SCENE_W, SCENE_H)
+
+    def shape(self) -> QPainterPath:
+        return QPainterPath()
+
+    def contains(self, point: QPointF) -> bool:
+        return False
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        if self._host is not None:
+            self._host.paint_sky_life(painter)
+
+
 class MoodMap(QGraphicsView):
     """Mood sky: baked starfield for smooth pinch; live stars only when zoomed in."""
 
@@ -552,6 +613,16 @@ class MoodMap(QGraphicsView):
         self._ranked: dict[int, RankedTrack] = {}
         self._positions: dict[int, QPointF] = {}
         self._current_id: int | None = None
+        self._sky_band = "night"
+        self._search_query = ""
+        self._search_ids: set[int] = set()
+        self._ripple_origin: QPointF | None = None
+        self._ripple_neighbors: list[tuple[QPointF, float]] = []
+        self._ripple_start = 0.0
+        self._ripple_until = 0.0
+        self._falling = False
+        self._fall_from = VIEW_ZOOM_MIN
+        self._fall_t = 0.0
         self._stars: dict[int, TrackStar] = {}
         self._sky_chrome: list[QGraphicsItem] = []
         self._star_grid: dict[tuple[int, int], list[tuple[int, QPointF]]] = {}
@@ -589,6 +660,12 @@ class MoodMap(QGraphicsView):
         self._lod_timer.setSingleShot(True)
         self._lod_timer.setInterval(LOD_DEFER_MS)
         self._lod_timer.timeout.connect(self._flush_zoom_lod)
+        self._life_timer = QTimer(self)
+        self._life_timer.setInterval(33)
+        self._life_timer.timeout.connect(self._tick_life)
+        self._fall_timer = QTimer(self)
+        self._fall_timer.setInterval(16)
+        self._fall_timer.timeout.connect(self._tick_fall)
         self._sky_bg = None
         self._draw_backdrop()
         self._links = QGraphicsPixmapItem()
@@ -611,6 +688,9 @@ class MoodMap(QGraphicsView):
         self._lens_color.setShapeMode(QGraphicsPixmapItem.ShapeMode.BoundingRectShape)
         self._lens_color.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         self._scene.addItem(self._lens_color)
+        self._life = SkyLifeOverlay()
+        self._life._host = self
+        self._scene.addItem(self._life)
         self._queue_order: list[int] = []
         self.lens = LensItem()
         self._scene.addItem(self.lens)
@@ -763,6 +843,7 @@ class MoodMap(QGraphicsView):
         return max(0.0, min(1.0, valence)), max(0.0, min(1.0, energy))
 
     def set_tracks(self, ranked: list[RankedTrack], current_id: int | None) -> None:
+        previous = self._current_id
         self._current_id = current_id
         self._ranked = {r.track.id: r for r in ranked}
         # Keep in-progress pin drags so play/nudge/refresh cannot snap the star back.
@@ -802,6 +883,159 @@ class MoodMap(QGraphicsView):
         self._refresh_route()
         self._lod_band = -1
         self._sync_live_stars(force=True)
+        if (
+            current_id is not None
+            and current_id != previous
+            and current_id in self._positions
+        ):
+            self._begin_ripple(current_id)
+        if self._search_query:
+            self._rematch_search()
+            self._apply_search_veil()
+        self._arm_life()
+
+    def set_sky_band(self, band: str) -> None:
+        """Night stays crisp. Day softens the stars. Dawn and dusk sit between."""
+        band = (band or "night").strip().lower()
+        if band == self._sky_band:
+            return
+        self._sky_band = band
+        if not self._ranked:
+            return
+        sig = self._field_signature()
+        if sig != self._field_sig:
+            self._field_sig = sig
+            self._rebuild_starfield()
+            self._refresh_lens_colors()
+        self._lod_band = -1
+        self._sync_live_stars(force=True)
+
+    def set_search_query(self, text: str) -> None:
+        """A query blacks out the sky and flares the matches. Blank restores it."""
+        query = text.strip().lower()
+        if query == self._search_query:
+            return
+        self._search_query = query
+        self._rematch_search()
+        self._lod_band = -1
+        self._sync_live_stars(force=True)
+        if self._ranked:
+            self._refresh_lens_colors()
+            self._refresh_route()
+        self._arm_life()
+
+    def _rematch_search(self) -> None:
+        self._search_ids = set()
+        query = self._search_query
+        if not query:
+            return
+        for item in self._ranked.values():
+            track = item.track
+            blob = f"{track.title}\n{track.artist}\n{track.album}".lower()
+            if query in blob:
+                self._search_ids.add(track.id)
+
+    def _apply_search_veil(self) -> None:
+        if not self._search_query:
+            for star in self._stars.values():
+                if abs(star.scale() - 1.35) < 0.05:
+                    star.setScale(1.0)
+            return
+        self._field.setOpacity(0.06)
+        self._links.setOpacity(0.04)
+        self._lens_color.setOpacity(0.16)
+        self._route.setOpacity(0.2)
+        for star in self._stars.values():
+            if star.ranked.track.id in self._search_ids:
+                star.setOpacity(1.0)
+                if abs(star.scale() - 1.35) > 0.02:
+                    star.setScale(1.35)
+            else:
+                star.setOpacity(0.05)
+                if abs(star.scale() - 1.0) > 0.02:
+                    star.setScale(1.0)
+
+    def _begin_ripple(self, track_id: int) -> None:
+        origin = self._positions.get(track_id)
+        if origin is None:
+            return
+        neighbors: list[tuple[QPointF, float]] = []
+        for other, pos in self._positions.items():
+            if other == track_id:
+                continue
+            dist = hypot(pos.x() - origin.x(), pos.y() - origin.y())
+            if dist <= 130.0:
+                neighbors.append((QPointF(pos), dist))
+        neighbors.sort(key=lambda pair: pair[1])
+        self._ripple_origin = QPointF(origin)
+        self._ripple_neighbors = neighbors[:40]
+        self._ripple_start = monotonic()
+        self._ripple_until = self._ripple_start + 0.62
+
+    def _arm_life(self) -> None:
+        alive = bool(self._current_id) or bool(self._search_query) or monotonic() < self._ripple_until
+        if alive:
+            if not self._life_timer.isActive():
+                self._life_timer.start()
+        else:
+            self._life_timer.stop()
+        self._life.update()
+
+    def _tick_life(self) -> None:
+        if not self._current_id and not self._search_query and monotonic() >= self._ripple_until:
+            self._life_timer.stop()
+        self._life.update()
+
+    def paint_sky_life(self, painter: QPainter) -> None:
+        """Pulse, ripple, and search flares. The baked field stays still."""
+        now = monotonic()
+        painter.setPen(Qt.PenStyle.NoPen)
+        if self._search_query:
+            for tid in self._search_ids:
+                pos = self._positions.get(tid)
+                item = self._ranked.get(tid)
+                if pos is None or item is None:
+                    continue
+                radius, color, _bloom = self._night_star(item, False)
+                flare = QColor(color)
+                flare.setAlpha(90)
+                painter.setBrush(QBrush(flare))
+                painter.drawEllipse(pos, radius * 7.5, radius * 7.5)
+                hot = QColor(255, 248, 236, 235)
+                painter.setBrush(QBrush(hot))
+                painter.drawEllipse(pos, max(2.4, radius * 1.2), max(2.4, radius * 1.2))
+        if self._ripple_origin is not None and now < self._ripple_until:
+            span = max(0.001, self._ripple_until - self._ripple_start)
+            age = now - self._ripple_start
+            t = min(1.0, age / span)
+            ring = QPen(QColor(232, 236, 248, int(170 * (1.0 - t))), 1.5)
+            ring.setCosmetic(True)
+            painter.setPen(ring)
+            painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+            painter.drawEllipse(self._ripple_origin, 8.0 + t * 140.0, 8.0 + t * 140.0)
+            painter.setPen(Qt.PenStyle.NoPen)
+            for pos, dist in self._ripple_neighbors:
+                local = age - dist / 250.0
+                if local < 0.0 or local > 0.28:
+                    continue
+                bump = sin(local / 0.28 * pi)
+                painter.setBrush(QBrush(QColor(255, 255, 255, int(130 * bump))))
+                painter.drawEllipse(pos, 1.5 + 3.0 * bump, 1.5 + 3.0 * bump)
+        searching_past = self._search_query and self._current_id not in self._search_ids
+        if self._current_id and not searching_past:
+            pos = self._positions.get(self._current_id)
+            item = self._ranked.get(self._current_id)
+            if pos is not None and item is not None:
+                beat = heartbeat_amount((now % 1.15) / 1.15)
+                radius, color, _bloom = self._night_star(item, False)
+                glow = QColor(color)
+                glow.setAlpha(int(36 + 150 * beat))
+                painter.setBrush(QBrush(glow))
+                painter.drawEllipse(
+                    pos,
+                    radius * (2.3 + 2.4 * beat),
+                    radius * (2.3 + 2.4 * beat),
+                )
 
     def _field_signature(self) -> object:
         """Cheap fingerprint so play/nudge/lens refresh can skip a full rebake."""
@@ -818,9 +1052,10 @@ class MoodMap(QGraphicsView):
                     bool(r.track.loved),
                     bool(r.track.pinned),
                     round(conf, 2),
+                    int(getattr(r.track, "duration_ms", 0) or 0),
                 )
             )
-        return (self._current_id, tuple(parts))
+        return (self._current_id, self._sky_band, tuple(parts))
 
     def _drag_locked_ids(self) -> set[int]:
         """Track ids currently being pressed/dragged — positions must not reset."""
@@ -890,6 +1125,14 @@ class MoodMap(QGraphicsView):
         for item in order:
             pos = self._positions[item.track.id]
             radius, color, bloom = self._night_star(item, density_mode)
+            haze = sky_haze(self._sky_band)
+            if haze > 0.05:
+                mist = QColor(206, 214, 232)
+                mist.setAlpha(int(22 + 50 * haze))
+                painter.setBrush(QBrush(mist))
+                painter.drawEllipse(pos, radius * (2.4 + 1.8 * haze), radius * (2.4 + 1.8 * haze))
+                color = QColor(color)
+                color.setAlpha(max(48, int(color.alpha() * (1.0 - 0.32 * haze))))
             if bloom:
                 glow = QColor(color)
                 glow.setAlpha(bloom)
@@ -953,6 +1196,7 @@ class MoodMap(QGraphicsView):
             pinned=bool(item.track.pinned),
             current=item.track.id == self._current_id,
             density=density,
+            duration_ms=getattr(item.track, "duration_ms", None),
         )
         bloom = 0
         if item.track.id == self._current_id:
@@ -1089,6 +1333,14 @@ class MoodMap(QGraphicsView):
             color = queue_star_color(item.quadrant, loved=bool(item.track.loved), band=band)
             if item.track.id == self._current_id:
                 color.setAlpha(255)
+            haze = sky_haze(self._sky_band)
+            if haze > 0.05:
+                mist = QColor(206, 214, 232)
+                mist.setAlpha(int(22 + 50 * haze))
+                painter.setBrush(QBrush(mist))
+                painter.drawEllipse(pos, radius * (2.4 + 1.8 * haze), radius * (2.4 + 1.8 * haze))
+                color = QColor(color)
+                color.setAlpha(max(48, int(color.alpha() * (1.0 - 0.32 * haze))))
             if bloom:
                 glow = QColor(color)
                 glow.setAlpha(min(110, bloom + 20))
@@ -1106,6 +1358,7 @@ class MoodMap(QGraphicsView):
         self._lens_color.setPixmap(QPixmap.fromImage(image))
         self._lens_color.setScale(1.0 / FIELD_SCALE)
         self._lens_color.setPos(x0, y0)
+        self._apply_search_veil()
 
     def _refresh_route(self) -> None:
         """Open path through the committed queue. Brightest on the song that is playing."""
@@ -1151,6 +1404,7 @@ class MoodMap(QGraphicsView):
         self._route.setPixmap(QPixmap.fromImage(image))
         self._route.setScale(1.0 / FIELD_SCALE)
         self._route.setPos(0, 0)
+        self._apply_search_veil()
 
     def lens_mood(self) -> tuple[float, float, float]:
         vx, ey = self.pos_to_mood(self.lens.pos())
@@ -1207,13 +1461,46 @@ class MoodMap(QGraphicsView):
 
     def reset_view(self) -> None:
         self._end_zoom_interaction()
+        self._cluster_once = True
+        if self._falling:
+            return
+        if self._user_zoom <= VIEW_ZOOM_MIN + 0.05:
+            self._settle_home()
+            return
+        self._fall_from = self._user_zoom
+        self._fall_t = 0.0
+        self._falling = True
+        self._fall_timer.start()
+
+    def _settle_home(self) -> None:
         self._user_zoom = VIEW_ZOOM_MIN
         self._zoom_target = VIEW_ZOOM_MIN
         self._pinch_zoom0 = VIEW_ZOOM_MIN
-        self._cluster_once = True
         self.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
         self._lod_band = -1
         self._sync_live_stars(force=True)
+
+    def _tick_fall(self) -> None:
+        """Zoom out quickly, then settle, so the sky rushes away like falling backward."""
+        self._fall_t += 16.0 / 460.0
+        t = min(1.0, self._fall_t)
+        ease = 1.0 - (1.0 - t) ** 2
+        zoom = self._fall_from + (VIEW_ZOOM_MIN - self._fall_from) * ease
+        if t < 0.45:
+            kick = sin(t / 0.45 * pi) * 0.14 * max(0.0, self._fall_from - 1.0)
+            zoom = max(VIEW_ZOOM_MIN, zoom - kick)
+        self._user_zoom = zoom
+        self._zoom_target = zoom
+        done = t >= 1.0
+        if done:
+            self._falling = False
+            self._fall_timer.stop()
+            self._settle_home()
+            return
+        center = self.mapToScene(self.viewport().rect().center())
+        self.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        self.scale(self._user_zoom, self._user_zoom)
+        self.centerOn(center)
 
     def _apply_base_fit(self) -> None:
         center = self.mapToScene(self.viewport().rect().center())
@@ -1301,6 +1588,7 @@ class MoodMap(QGraphicsView):
             self._field.setOpacity(1.0)
             self._lens_color.setOpacity(1.0)
             self._route.setOpacity(1.0)
+            self._apply_search_veil()
             return
 
         # Fade the baked field slightly so live bodies read clearly.
@@ -1363,6 +1651,7 @@ class MoodMap(QGraphicsView):
                 show_label = True
                 labeled += 1
             star.set_lod(glow_a, show_label)
+        self._apply_search_veil()
 
     def _anchor_point(self, view_pos: QPoint | QPointF) -> QPoint:
         return view_pos.toPoint() if isinstance(view_pos, QPointF) else QPoint(view_pos)
@@ -1401,6 +1690,9 @@ class MoodMap(QGraphicsView):
         return self.mapFromScene(focus)
 
     def _set_zoom_target(self, zoom: float, view_pos: QPoint | QPointF) -> None:
+        if self._falling:
+            self._falling = False
+            self._fall_timer.stop()
         self._begin_zoom_interaction()
         self._zoom_target = max(VIEW_ZOOM_MIN, min(VIEW_ZOOM_MAX, zoom))
         anchor = self._anchor_point(view_pos)

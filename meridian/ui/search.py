@@ -24,6 +24,7 @@ class TrackSearch(QLineEdit):
     """
 
     track_chosen = Signal(int)
+    query_changed = Signal(str)
 
     def __init__(self, library: Library, parent=None) -> None:
         super().__init__(parent)
@@ -119,6 +120,7 @@ class TrackSearch(QLineEdit):
         self._model.setStringList(labels)
         if self._hits and self.hasFocus() and query.strip():
             self._completer.complete()
+        self.query_changed.emit(query)
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt API)
         popup = self._completer.popup()

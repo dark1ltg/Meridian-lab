@@ -93,7 +93,7 @@ def test_mood_map_plots_full_ranked_set_and_density_bake() -> None:
     assert len(m._ranked) == 3000
     assert len(m._positions) == 3000
     # Field signature enumerates every track id — bake does not merge/cull stars.
-    _cid, parts = m._field_signature()
+    _cid, _band, parts = m._field_signature()
     assert len(parts) == 3000
     assert {p[0] for p in parts} == set(range(1, 3001))
     # Density underlay + floor radius: bake must produce a non-null field pixmap.
@@ -144,7 +144,7 @@ def test_one_song_one_star_cardinality_close_coords() -> None:
     # Grid indexes every star for sky pick — no merged pickable entity.
     grid_ids = {tid for cell in m._star_grid.values() for tid, _ in cell}
     assert grid_ids == set(m._ranked)
-    _cid, parts = m._field_signature()
+    _cid, _band, parts = m._field_signature()
     assert len(parts) == n
 
 
