@@ -67,15 +67,16 @@ def apply_timbre_mark(
     *,
     current: bool,
 ) -> tuple[QColor, float, int]:
-    """A clear tone stays a hard point. A noisy tone stays a softer, smaller core."""
+    """A clear tone stays a hard point. A noisy tone is softer paint, same size."""
     if current or timbre not in ("tonal", "noisy"):
         return color, radius, bloom
     marked = QColor(color)
     if timbre == "tonal":
         marked.setAlpha(min(255, max(marked.alpha(), 235)))
         return marked, radius, 0
-    marked.setAlpha(max(70, int(marked.alpha() * 0.62)))
-    return marked, radius * 0.84, max(int(bloom), 42)
+    # Softer paint only. Same size as every other star, and no extra glow.
+    marked.setAlpha(max(70, int(marked.alpha() * 0.72)))
+    return marked, radius, int(bloom)
 
 
 def quiet_star_color(band: int) -> QColor:
@@ -440,9 +441,6 @@ class TrackStar(QGraphicsEllipseItem):
             glow_c.setAlpha(40 if band == "low" else (65 if band == "mid" else 90))
         if timbre == "tonal" and not current and not pinned:
             glow_c.setAlpha(0)
-        elif timbre == "noisy" and not current:
-            glow_r *= 1.2
-            glow_c.setAlpha(min(130, glow_c.alpha() + 36))
         self._glow.setRect(-glow_r, -glow_r, glow_r * 2, glow_r * 2)
         self._glow.setBrush(QBrush(glow_c))
 
@@ -882,7 +880,11 @@ class MoodMap(QGraphicsView):
     def set_tracks(self, ranked: list[RankedTrack], current_id: int | None) -> None:
         previous = self._current_id
         self._current_id = current_id
-        placed = [r for r in ranked if not track_is_unplaced(r.track)]
+        placed = [
+            r
+            for r in ranked
+            if r.track.id == current_id or not track_is_unplaced(r.track)
+        ]
         self._ranked = {r.track.id: r for r in placed}
         ranked = placed
         # Keep in-progress pin drags so play/nudge/refresh cannot snap the star back.

@@ -831,7 +831,8 @@ class Library:
         updates: list[tuple[float, float, str, int]] = []
         for row in rows:
             note_raw = row["confidence_note"] if "confidence_note" in row.keys() else ""
-            if "listen finish" in (note_raw or "") or "kept prior" in (note_raw or ""):
+            # "listen finish" is the play-through note. Do not treat it as this pass.
+            if "acoustic point" in (note_raw or "") or "kept prior" in (note_raw or ""):
                 continue
             bright = _finite(row["brightness"])
             flux = _finite(row["acoustic_flux"])
@@ -851,7 +852,7 @@ class Library:
             e = max(0.03, min(0.97, e0 + de))
             if abs(v - v0) < 1e-4 and abs(e - e0) < 1e-4:
                 continue
-            note = self._append_note(note_raw, "listen finish")
+            note = self._append_note(note_raw, "acoustic point")
             updates.append((v, e, note, int(row["id"])))
 
         if not updates:

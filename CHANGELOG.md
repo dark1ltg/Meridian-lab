@@ -36,6 +36,7 @@ Version stays **1.3.6**. This refresh makes the short listen more honest and the
 - The context queue rows are stars in play order. The four matrix lists are plain names again, with the colored top edge and subtitle.
 - Matrix song rows have a little more line height (two pixels above and below). The queue list is unchanged.
 - Unheard songs with no genre sticker stay off the middle of the sky. A clear listen may leave a well-tagged sticker by the evidence widen. Stored brightness and flux finish the spot for trusted songs too. A clean listen lets strong brightness or motion count more. A clear tone draws as a hard point and a noisy one stays softer.
+- A played song still gets the listen nudge, and the acoustic finish no longer skips it. Soundtrack and game labels stay off the sky until a listen. A filename keyword still shows. A muddy flux no longer counts as agreement. A noisy star keeps the same size. A strong clean brightness or motion still moves the point after the genre clamp. The song that is playing stays on the sky even when it has no mood yet.
 - The quarter grid is gone. The four corners carry colder or warmer light, and diving in fades the constellations and grows a name plus a role chip.
 
 ### What’s new (plain English)

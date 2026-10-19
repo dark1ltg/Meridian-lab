@@ -224,11 +224,10 @@ def classify(tracks: list[Track], ctx: Context, explicit_ids: set[int]) -> list[
     ranked: list[RankedTrack] = []
     distances: list[float] = []
     for track in tracks:
-        # No genre and no listen yet: keep the song in the plan, but not as a mid mood.
+        # No real mood yet: not a star, and not a shelf row pretending to be one.
         if track_is_unplaced(track):
-            dist = 2.0
-        else:
-            dist = hypot(track.valence - target_x, track.energy - target_y)
+            continue
+        dist = hypot(track.valence - target_x, track.energy - target_y)
         fit = _gauss(dist, radius)
         plays = int(track.play_count or 0)
         skips = int(track.skip_count or 0)

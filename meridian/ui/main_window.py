@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from meridian import __version__
-from meridian.features import CONFIDENCE_HIGH, CONFIDENCE_LOW
+from meridian.features import CONFIDENCE_HIGH, CONFIDENCE_LOW, track_is_unplaced
 from meridian.context import (
     LENS_RADIUS_DEFAULT,
     LENS_RADIUS_MAX,
@@ -44,7 +44,7 @@ from meridian.host_deps import (
 )
 from meridian.library import Library
 from meridian.player import Player
-from meridian.queue_engine import Quadrant, QueuePlan, RenewalContext, build_plan
+from meridian.queue_engine import Quadrant, QueuePlan, RankedTrack, RenewalContext, build_plan
 from meridian.scanner import (
     AnalyzeTrackQueue,
     AnalyzeWorker,
@@ -513,6 +513,29 @@ class MainWindow(QMainWindow):
         self.band_chip.setText(ctx.band_label)
         self.map.set_sky_band(ctx.band.value)
 
+    def _sky_ranked(self, current_id: int | None) -> list[RankedTrack]:
+        """Plan stars, plus the song that is playing when it has no mood yet.
+
+        That one star stays on the sky so you can see it. It does not re-enter
+        the matrix or the queue. A song missing for another reason stays missing.
+        """
+        ranked = list(self.plan.ranked) if self.plan else []
+        if current_id is None or any(r.track.id == current_id for r in ranked):
+            return ranked
+        track = self.library.get(current_id) if self.library else None
+        if track is None or not track_is_unplaced(track):
+            return ranked
+        ranked.append(
+            RankedTrack(
+                track=track,
+                fit=0.0,
+                importance=0.0,
+                urgency=0.0,
+                quadrant=Quadrant.SHELF,
+            )
+        )
+        return ranked
+
     def _renew_queue(self) -> None:
         """New recommendation pass from the current matrix — not skips, not shuffle."""
         if self._closing or self._rebuild_lock:
@@ -534,7 +557,7 @@ class MainWindow(QMainWindow):
             heard_ids=frozenset(self.played_history),
         )
         self.plan = build_plan(tracks, ctx, self.explicit, renewal=renewal)
-        self.map.set_tracks(self.plan.ranked, current_id)
+        self.map.set_tracks(self._sky_ranked(current_id), current_id)
         self.matrix.set_plan(self.plan.by_quadrant)
         kept_ephemeral = {tid for tid in self.ephemeral if tid in self.plan.order}
         self.session_queue = list(self.plan.order)
@@ -563,7 +586,7 @@ class MainWindow(QMainWindow):
         tracks = self._playable_tracks()
         current_id = self.player.current.id if self.player.current else None
         self.plan = build_plan(tracks, ctx, self.explicit)
-        self.map.set_tracks(self.plan.ranked, current_id)
+        self.map.set_tracks(self._sky_ranked(current_id), current_id)
         self.matrix.set_plan(self.plan.by_quadrant)
         if rebuild_queue:
             # Keep one-shot matrix pulls that still appear in the new order.
@@ -1338,7 +1361,7 @@ class MainWindow(QMainWindow):
             self._rebuild_lock = False
             self._flush_pending_plan_refresh()
             if self.plan:
-                self.map.set_tracks(self.plan.ranked, track_id)
+                self.map.set_tracks(self._sky_ranked(track_id), track_id)
             self._fill_queue()
             return
 
@@ -1393,7 +1416,7 @@ class MainWindow(QMainWindow):
         self._rebuild_lock = False
         self._flush_pending_plan_refresh()
         if self.plan:
-            self.map.set_tracks(self.plan.ranked, track_id)
+            self.map.set_tracks(self._sky_ranked(track_id), track_id)
         self._fill_queue()
 
     def _clear_crossfade_credit(self) -> None:
@@ -1429,7 +1452,7 @@ class MainWindow(QMainWindow):
         self._rebuild_lock = False
         self._flush_pending_plan_refresh()
         if self.plan:
-            self.map.set_tracks(self.plan.ranked, track_id)
+            self.map.set_tracks(self._sky_ranked(track_id), track_id)
         self._fill_queue()
 
     def _playback_error(self, message: str) -> None:
@@ -1674,7 +1697,7 @@ class MainWindow(QMainWindow):
         self.plan = build_plan(
             tracks, ctx, self.explicit, exclude_ids=exclude, hard_exclude_ids=hard
         )
-        self.map.set_tracks(self.plan.ranked, current_id)
+        self.map.set_tracks(self._sky_ranked(current_id), current_id)
         self.matrix.set_plan(self.plan.by_quadrant)
         order = list(self.plan.order)
         if avoid is not None:

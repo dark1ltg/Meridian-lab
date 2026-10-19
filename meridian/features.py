@@ -217,9 +217,14 @@ DEFAULT_VALENCE = 0.5
 DEFAULT_ENERGY = 0.48
 
 
-def track_is_unplaced(track: object) -> bool:
-    """Unheard, and no genre sticker. The stored middle is not a mood.
+def _note_tokens(note: str) -> list[str]:
+    return [part.strip() for part in str(note or "").split("·") if part.strip()]
 
+
+def track_is_unplaced(track: object) -> bool:
+    """Unheard, with no real mood sticker. Container labels are not a mood.
+
+    A filename keyword counts. A soundtrack / game / score label does not.
     Missing ``analyzed`` means the caller already decided this row is on the map.
     """
     if getattr(track, "pinned", False):
@@ -227,10 +232,19 @@ def track_is_unplaced(track: object) -> bool:
     analyzed = getattr(track, "analyzed", None)
     if analyzed is None or bool(analyzed):
         return False
-    note = str(getattr(track, "confidence_note", "") or "")
-    if "tag:" in note or "path:" in note:
+    tokens = _note_tokens(str(getattr(track, "confidence_note", "") or ""))
+    if any(token == "keywords" or token.startswith("keywords ") for token in tokens):
+        return False
+    stickers: list[str] = []
+    for token in tokens:
+        for prefix in ("tag:", "path:"):
+            if token.startswith(prefix):
+                stickers.append(token[len(prefix) :].strip().lower())
+    if any(label and label not in CONTAINER_SEED_KEYS for label in stickers):
         return False
     return True
+
+
 # Dump / raw formats often have empty or junk tags — favor PCM more.
 WEAK_TAG_EXTS = {".wav", ".aiff", ".aif"}
 # Contextual catalog labels: useful neighborhood priors, not soft-PCM locks.
@@ -2154,6 +2168,16 @@ def _pcm_mood_cues(
     return profile.valence, profile.energy, profile.bpm, profile.unstable, profile
 
 
+def _cue_supports_move(cue: float, move: float) -> bool:
+    """A cue in the muddy middle does not count as agreement."""
+    if abs(move) <= 0.12:
+        return True
+    cue_delta = float(cue) - 0.5
+    if abs(cue_delta) < 0.08:
+        return False
+    return move * cue_delta > 0
+
+
 def _listen_cues_agree(
     *,
     bright: float,
@@ -2166,15 +2190,30 @@ def _listen_cues_agree(
     """True when brightness and motion point the same way as the listen's move."""
     e_delta = float(energy_pcm) - float(seed_e)
     v_delta = float(valence_pcm) - float(seed_v)
-    if e_delta > 0.12 and flux < 0.45:
+    if abs(e_delta) <= 0.12 and abs(v_delta) <= 0.12:
         return False
-    if e_delta < -0.12 and flux > 0.62:
-        return False
-    if v_delta > 0.12 and bright < 0.45:
-        return False
-    if v_delta < -0.12 and bright > 0.62:
-        return False
-    return True
+    return _cue_supports_move(flux, e_delta) and _cue_supports_move(bright, v_delta)
+
+
+def _retain_clean_cue(
+    value: float,
+    seed: float,
+    cue: float,
+    pcm: float,
+    ceiling: float,
+) -> float:
+    """Keep a slice of a strong clean cue that the genre clamp would otherwise drop."""
+    if abs(float(cue) - 0.5) < 0.16:
+        return float(value)
+    cue_delta = float(cue) - 0.5
+    move = float(pcm) - float(seed)
+    if abs(move) > 0.05 and move * cue_delta <= 0:
+        return float(value)
+    step = max(-ceiling, min(ceiling, cue_delta * 0.40))
+    target = float(seed) + step
+    pulled = float(value) + 0.55 * (target - float(value))
+    kept = float(seed) + max(-ceiling, min(ceiling, pulled - float(seed)))
+    return float(np.clip(kept, 0.03, 0.97))
 
 
 def analyze_audio(
@@ -2502,6 +2541,27 @@ def analyze_audio(
                 0.97,
             )
         )
+    if soft_pcm_only and pcm_ok and profile is not None:
+        slope_now = _finite_attr(profile, "spectral_slope", 0.5)
+        if (
+            slope_now >= SLOPE_CLEAR_MIN
+            and not bool(pcm_unstable)
+            and _finite_attr(profile, "variation", 0.0) < 0.22
+        ):
+            valence = _retain_clean_cue(
+                valence,
+                seed_v,
+                _finite_attr(profile, "brightness", 0.5),
+                valence_pcm,
+                EVIDENCE_SOFT_VALENCE_MAX,
+            )
+            energy = _retain_clean_cue(
+                energy,
+                seed_e,
+                _finite_attr(profile, "flux", 0.5),
+                energy_pcm,
+                EVIDENCE_SOFT_ENERGY_MAX,
+            )
 
     used_jitter = False
     if (

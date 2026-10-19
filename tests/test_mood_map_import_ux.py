@@ -202,8 +202,9 @@ def test_sticky_job_status_survives_hover() -> None:
 
 
 def test_plan_ranked_matches_playable_after_scan(tmp_path: Path) -> None:
-    """After a mock scan, classify/build_plan ranked length equals playable count."""
+    """Tagless unheard files stay in the library and off the plan."""
     from meridian.context import LENS_RADIUS_DEFAULT, Mode, make_context
+    from meridian.features import track_is_unplaced
     from meridian.library import Library
     from meridian.queue_engine import build_plan
     from meridian.scanner import ScanWorker
@@ -221,6 +222,9 @@ def test_plan_ranked_matches_playable_after_scan(tmp_path: Path) -> None:
         tracks = lib.all_tracks()
         ctx = make_context(Mode.WANDER, 0.5, 0.5, LENS_RADIUS_DEFAULT, 0.0)
         plan = build_plan(tracks, ctx, [])
-        assert len(plan.ranked) == len(tracks) == 12
+        placed = [t for t in tracks if not track_is_unplaced(t)]
+        assert len(tracks) == 12
+        assert len(plan.ranked) == len(placed)
+        assert placed == []
     finally:
         lib.close()
