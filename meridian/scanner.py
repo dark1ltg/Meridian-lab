@@ -400,6 +400,7 @@ def run_library_tidy(library: Library) -> None:
     library.smooth_artist_moods()
     library.spread_album_acoustics()
     library.rescale_moods_by_percentile()
+    library.finish_listen_points()
 
 
 class TidyWorker(QObject):

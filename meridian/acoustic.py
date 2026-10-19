@@ -800,6 +800,19 @@ def build_profile(pcm: np.ndarray, samplerate: int = SAMPLERATE) -> AcousticProf
     )
     energy = float(np.clip(0.12 + (energy - 0.12) * motion_scale, 0.03, 0.97))
 
+    # Clean listen: a strong brightness or a strong motion counts more than the
+    # mid-weighted mix. Hiss, muffled audio, and unstable windows stay cautious.
+    if (
+        audibility >= 0.80
+        and not unstable
+        and variation <= 0.22
+        and slope_clarity >= 0.55
+    ):
+        if abs(bright_term - 0.5) >= 0.16:
+            valence = float(np.clip(0.70 * valence + 0.30 * bright_term, 0.03, 0.97))
+        if abs(kinetic - 0.5) >= 0.16:
+            energy = float(np.clip(0.70 * energy + 0.30 * kinetic, 0.03, 0.97))
+
     # np.clip does not scrub NaN — never leak non-finite moods.
     if not np.isfinite(valence):
         valence = 0.5

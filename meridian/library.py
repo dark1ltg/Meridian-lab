@@ -801,6 +801,73 @@ class Library:
             self.conn.commit()
         return len(updates)
 
+    def finish_listen_points(self, max_shift: float = 0.055) -> int:
+        """Let stored brightness and flux finish the spot, including trusted songs.
+
+        Brighter audio nudges Glow. Busier flux nudges Kinetic. The cap keeps
+        the song inside the mood the lens already means. Idempotent.
+        """
+        import math
+
+        with self.lock:
+            rows = self.conn.execute(
+                """
+                SELECT id, valence, energy, pinned, brightness, acoustic_flux,
+                       confidence_note
+                FROM tracks
+                WHERE analyzed = 1 AND pinned = 0
+                """
+            ).fetchall()
+
+        def _finite(value) -> float | None:
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                return None
+            if not math.isfinite(number):
+                return None
+            return number
+
+        updates: list[tuple[float, float, str, int]] = []
+        for row in rows:
+            note_raw = row["confidence_note"] if "confidence_note" in row.keys() else ""
+            if "listen finish" in (note_raw or "") or "kept prior" in (note_raw or ""):
+                continue
+            bright = _finite(row["brightness"])
+            flux = _finite(row["acoustic_flux"])
+            if bright is None and flux is None:
+                continue
+            dv = 0.0
+            de = 0.0
+            if bright is not None:
+                dv = max(-max_shift, min(max_shift, 0.22 * (bright - 0.5)))
+            if flux is not None:
+                de = max(-max_shift, min(max_shift, 0.20 * (flux - 0.5)))
+            if abs(dv) < 1e-4 and abs(de) < 1e-4:
+                continue
+            v0 = float(row["valence"])
+            e0 = float(row["energy"])
+            v = max(0.03, min(0.97, v0 + dv))
+            e = max(0.03, min(0.97, e0 + de))
+            if abs(v - v0) < 1e-4 and abs(e - e0) < 1e-4:
+                continue
+            note = self._append_note(note_raw, "listen finish")
+            updates.append((v, e, note, int(row["id"])))
+
+        if not updates:
+            return 0
+        with self.lock:
+            self.conn.executemany(
+                """
+                UPDATE tracks
+                SET valence = ?, energy = ?, confidence_note = ?
+                WHERE id = ? AND pinned = 0
+                """,
+                updates,
+            )
+            self.conn.commit()
+        return len(updates)
+
     def rescale_moods_by_percentile(self, min_group: int = 12) -> int:
         """P4: library/genre percentile rescale for relative placement (no ffmpeg).
 

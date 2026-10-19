@@ -5,7 +5,7 @@ from enum import Enum
 from math import exp, hypot
 
 from meridian.context import Context, LENS_RADIUS_MIN, Mode, band_bias, mode_bias
-from meridian.features import CONFIDENCE_HIGH, CONFIDENCE_LOW
+from meridian.features import CONFIDENCE_HIGH, CONFIDENCE_LOW, track_is_unplaced
 from meridian.library import Track
 
 
@@ -224,7 +224,11 @@ def classify(tracks: list[Track], ctx: Context, explicit_ids: set[int]) -> list[
     ranked: list[RankedTrack] = []
     distances: list[float] = []
     for track in tracks:
-        dist = hypot(track.valence - target_x, track.energy - target_y)
+        # No genre and no listen yet: keep the song in the plan, but not as a mid mood.
+        if track_is_unplaced(track):
+            dist = 2.0
+        else:
+            dist = hypot(track.valence - target_x, track.energy - target_y)
         fit = _gauss(dist, radius)
         plays = int(track.play_count or 0)
         skips = int(track.skip_count or 0)

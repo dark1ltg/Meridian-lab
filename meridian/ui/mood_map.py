@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
 from meridian.context import LENS_RADIUS_DEFAULT, LENS_RADIUS_MAX, LENS_RADIUS_MIN
 from meridian.queue_engine import QUADRANT_TITLE, Quadrant, RankedTrack
 from meridian.ui.fonts import sans
-from meridian.features import CONFIDENCE_HIGH, CONFIDENCE_LOW
+from meridian.features import CONFIDENCE_HIGH, CONFIDENCE_LOW, track_is_unplaced
 from meridian.ui.palette import (
     LOW_TRUST_QCOLOR,
     MID_CONFIDENCE_OPACITY,
@@ -57,6 +57,25 @@ STAR_BODY_FLOOR_DENSE = 2.15
 
 def _star_mag(track_id: int) -> float:
     return ((track_id * 2654435761) & 0xFFFF) / 65535.0
+
+
+def apply_timbre_mark(
+    color: QColor,
+    radius: float,
+    bloom: int,
+    timbre: str | None,
+    *,
+    current: bool,
+) -> tuple[QColor, float, int]:
+    """A clear tone stays a hard point. A noisy tone stays a softer, smaller core."""
+    if current or timbre not in ("tonal", "noisy"):
+        return color, radius, bloom
+    marked = QColor(color)
+    if timbre == "tonal":
+        marked.setAlpha(min(255, max(marked.alpha(), 235)))
+        return marked, radius, 0
+    marked.setAlpha(max(70, int(marked.alpha() * 0.62)))
+    return marked, radius * 0.84, max(int(bloom), 42)
 
 
 def quiet_star_color(band: int) -> QColor:
@@ -357,6 +376,11 @@ class TrackStar(QGraphicsEllipseItem):
         haze = sky_haze(getattr(host, "_sky_band", "night") if host is not None else "night")
         if haze > 0.05:
             self.setOpacity(self.opacity() * (1.0 - 0.28 * haze))
+        timbre = getattr(ranked.track, "timbre_flag", None)
+        if timbre == "tonal" and not current:
+            self.setOpacity(min(1.0, max(self.opacity(), 0.95)))
+        elif timbre == "noisy" and not current:
+            self.setOpacity(self.opacity() * 0.72)
         self.setBrush(QBrush(color))
 
         pinned = bool(ranked.track.pinned)
@@ -409,12 +433,17 @@ class TrackStar(QGraphicsEllipseItem):
         self.setToolTip(tip)
 
         glow_r = r * (3.8 if pinned else 3.4) * (1.0 + 0.55 * haze)
-        self._glow.setRect(-glow_r, -glow_r, glow_r * 2, glow_r * 2)
         glow_c = QColor(color)
         if pinned:
             glow_c.setAlpha(110)
         else:
             glow_c.setAlpha(40 if band == "low" else (65 if band == "mid" else 90))
+        if timbre == "tonal" and not current and not pinned:
+            glow_c.setAlpha(0)
+        elif timbre == "noisy" and not current:
+            glow_r *= 1.2
+            glow_c.setAlpha(min(130, glow_c.alpha() + 36))
+        self._glow.setRect(-glow_r, -glow_r, glow_r * 2, glow_r * 2)
         self._glow.setBrush(QBrush(glow_c))
 
         title = ranked.track.label
@@ -853,7 +882,9 @@ class MoodMap(QGraphicsView):
     def set_tracks(self, ranked: list[RankedTrack], current_id: int | None) -> None:
         previous = self._current_id
         self._current_id = current_id
-        self._ranked = {r.track.id: r for r in ranked}
+        placed = [r for r in ranked if not track_is_unplaced(r.track)]
+        self._ranked = {r.track.id: r for r in placed}
+        ranked = placed
         # Keep in-progress pin drags so play/nudge/refresh cannot snap the star back.
         locked = self._drag_locked_ids()
         preserved: dict[int, QPointF] = {}
@@ -1126,6 +1157,7 @@ class MoodMap(QGraphicsView):
                     bool(r.track.pinned),
                     round(conf, 2),
                     int(getattr(r.track, "duration_ms", 0) or 0),
+                    str(getattr(r.track, "timbre_flag", "") or ""),
                 )
             )
         return (self._current_id, self._sky_band, tuple(parts))
@@ -1282,6 +1314,13 @@ class MoodMap(QGraphicsView):
             bloom = 28
         if item.track.pinned and item.track.id != self._current_id:
             bloom = max(bloom, 34)
+        color, radius, bloom = apply_timbre_mark(
+            color,
+            radius,
+            bloom,
+            getattr(item.track, "timbre_flag", None),
+            current=item.track.id == self._current_id,
+        )
         return radius, color, bloom
 
     def _constellation_segments(self) -> list[tuple[float, float, float, float, float]]:

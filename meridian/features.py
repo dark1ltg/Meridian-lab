@@ -215,6 +215,22 @@ KEYWORD_SHIFT_CAP = 0.18
 REPLAYGAIN_ENERGY_CAP = 0.06
 DEFAULT_VALENCE = 0.5
 DEFAULT_ENERGY = 0.48
+
+
+def track_is_unplaced(track: object) -> bool:
+    """Unheard, and no genre sticker. The stored middle is not a mood.
+
+    Missing ``analyzed`` means the caller already decided this row is on the map.
+    """
+    if getattr(track, "pinned", False):
+        return False
+    analyzed = getattr(track, "analyzed", None)
+    if analyzed is None or bool(analyzed):
+        return False
+    note = str(getattr(track, "confidence_note", "") or "")
+    if "tag:" in note or "path:" in note:
+        return False
+    return True
 # Dump / raw formats often have empty or junk tags — favor PCM more.
 WEAK_TAG_EXTS = {".wav", ".aiff", ".aif"}
 # Contextual catalog labels: useful neighborhood priors, not soft-PCM locks.
@@ -2138,6 +2154,29 @@ def _pcm_mood_cues(
     return profile.valence, profile.energy, profile.bpm, profile.unstable, profile
 
 
+def _listen_cues_agree(
+    *,
+    bright: float,
+    flux: float,
+    valence_pcm: float,
+    energy_pcm: float,
+    seed_v: float,
+    seed_e: float,
+) -> bool:
+    """True when brightness and motion point the same way as the listen's move."""
+    e_delta = float(energy_pcm) - float(seed_e)
+    v_delta = float(valence_pcm) - float(seed_v)
+    if e_delta > 0.12 and flux < 0.45:
+        return False
+    if e_delta < -0.12 and flux > 0.62:
+        return False
+    if v_delta > 0.12 and bright < 0.45:
+        return False
+    if v_delta < -0.12 and bright > 0.62:
+        return False
+    return True
+
+
 def analyze_audio(
     path: str,
     genre: str,
@@ -2350,6 +2389,28 @@ def analyze_audio(
             # Clear dark low end: allow Shadow room (do not shrink valence pull).
             soft_shift_v = max(soft_shift_v, min(EVIDENCE_SOFT_VALENCE_MAX, soft_shift_v * 1.15))
             pcm_w_v = min(0.62, pcm_w_v + 0.06)
+
+        # Clear listen that agrees with itself and disagrees with the sticker
+        # keeps the evidence widen. Good tags no longer pull that move back.
+        flux_pcm = _finite_attr(profile, "flux", 0.5) if profile else 0.5
+        if (
+            soft_pcm_only
+            and onset_c > 0.70
+            and not unstable
+            and variation < 0.22
+            and disagree > 0.18
+            and slope >= SLOPE_CLEAR_MIN
+            and _listen_cues_agree(
+                bright=bright_pcm,
+                flux=flux_pcm,
+                valence_pcm=valence_pcm,
+                energy_pcm=energy_pcm,
+                seed_v=seed_v,
+                seed_e=seed_e,
+            )
+        ):
+            soft_shift_v = max(soft_shift_v, EVIDENCE_SOFT_VALENCE_MAX)
+            soft_shift_e = max(soft_shift_e, EVIDENCE_SOFT_ENERGY_MAX)
 
         soft_shift = soft_shift_e  # post-BPM energy reclamp uses Kinetic envelope
 
