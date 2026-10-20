@@ -249,6 +249,122 @@ def constellation_segments(
                     break
     return segments
 
+
+# A closer line gathers a shape. A long line stays a line, so two figures do not become one.
+BIN_SPAN = 56.0
+BIN_MIN = 4
+BIN_REACH = 26.0
+BIN_WASHES = (
+    (186, 164, 230, 108),
+    (142, 176, 214, 104),
+    (214, 164, 176, 100),
+    (154, 196, 186, 102),
+    (176, 176, 214, 106),
+)
+
+
+def _bin_key(x: float, y: float) -> tuple[float, float]:
+    return (round(float(x), 2), round(float(y), 2))
+
+
+def _find_bin(parent: dict[tuple[float, float], tuple[float, float]], key: tuple[float, float]) -> tuple[float, float]:
+    while parent[key] != key:
+        parent[key] = parent[parent[key]]
+        key = parent[key]
+    return key
+
+
+def constellation_groups(
+    segments: list[tuple[float, float, float, float, float]],
+) -> list[list[tuple[float, float]]]:
+    """Songs a closer constellation line already joins.
+
+    Nothing here is moved. Songs closer than the lines are willing to draw
+    stay out, and a long line does not glue two figures into one shape.
+    """
+    parent: dict[tuple[float, float], tuple[float, float]] = {}
+
+    def adopt(key: tuple[float, float]) -> tuple[float, float]:
+        parent.setdefault(key, key)
+        return _find_bin(parent, key)
+
+    for x1, y1, x2, y2, dist in segments:
+        if dist < SKY_LINK_MIN or dist > BIN_SPAN:
+            continue
+        left = _bin_key(x1, y1)
+        right = _bin_key(x2, y2)
+        if left == right:
+            continue
+        root_left = adopt(left)
+        root_right = adopt(right)
+        if root_left != root_right:
+            parent[root_right] = root_left
+    grouped: dict[tuple[float, float], list[tuple[float, float]]] = {}
+    for key in parent:
+        grouped.setdefault(_find_bin(parent, key), []).append(key)
+    figures = [points for points in grouped.values() if len(points) >= BIN_MIN]
+    figures.sort(
+        key=lambda points: (
+            sum(point[0] for point in points) / len(points),
+            sum(point[1] for point in points) / len(points),
+        )
+    )
+    return figures
+
+
+def constellation_bin_image(
+    groups: list[list[tuple[float, float]]],
+    haze: float = 0.0,
+) -> QImage:
+    """Unmarked washes. Overlaps stay one strength, and no name is drawn."""
+    width = SCENE_W * FIELD_SCALE
+    height = SCENE_H * FIELD_SCALE
+    image = np.zeros((height, width, 4), dtype=np.uint8)
+    soften = 1.0 - 0.62 * float(np.clip(haze, 0.0, 1.0))
+    if groups and soften > 0.04:
+        reach = BIN_REACH * FIELD_SCALE
+        rim = 4.0 * FIELD_SCALE
+        span = int(np.ceil(reach + rim)) + 1
+        yy, xx = np.ogrid[-span : span + 1, -span : span + 1]
+        dist2 = xx.astype(np.float32) ** 2 + yy.astype(np.float32) ** 2
+        inner = dist2 <= reach * reach
+        outer = (dist2 <= (reach + rim) ** 2) & ~inner
+        for index, points in enumerate(groups):
+            red, green, blue, alpha = BIN_WASHES[index % len(BIN_WASHES)]
+            fill_a = int(round(alpha * soften))
+            rim_a = int(round(fill_a * 0.45))
+            stamp = np.zeros((span * 2 + 1, span * 2 + 1, 4), dtype=np.uint8)
+            stamp[outer] = (red, green, blue, rim_a)
+            stamp[inner] = (red, green, blue, fill_a)
+            for x, y in points:
+                cx = int(round(x * FIELD_SCALE))
+                cy = int(round(y * FIELD_SCALE))
+                x0 = cx - span
+                y0 = cy - span
+                x1 = cx + span + 1
+                y1 = cy + span + 1
+                sx0 = 0
+                sy0 = 0
+                if x0 < 0:
+                    sx0 = -x0
+                    x0 = 0
+                if y0 < 0:
+                    sy0 = -y0
+                    y0 = 0
+                if x1 > width:
+                    x1 = width
+                if y1 > height:
+                    y1 = height
+                if x0 >= x1 or y0 >= y1:
+                    continue
+                patch = stamp[sy0 : sy0 + (y1 - y0), sx0 : sx0 + (x1 - x0)]
+                dest = image[y0:y1, x0:x1]
+                stronger = patch[:, :, 3] > dest[:, :, 3]
+                dest[stronger] = patch[stronger]
+    qimg = QImage(image.data, width, height, int(image.strides[0]), QImage.Format.Format_RGBA8888)
+    return qimg.copy()
+
+
 # View magnification on top of fit-to-widget (1 = whole night sky).
 VIEW_ZOOM_MIN = 1.0
 VIEW_ZOOM_MAX = 14.0
@@ -1059,6 +1175,12 @@ class MoodMap(QGraphicsView):
         self._links.setShapeMode(QGraphicsPixmapItem.ShapeMode.BoundingRectShape)
         self._links.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         self._scene.addItem(self._links)
+        self._bins = QGraphicsPixmapItem()
+        # Between the tiles and the lines: a shape, then the lines that gathered it.
+        self._bins.setZValue(5.755)
+        self._bins.setShapeMode(QGraphicsPixmapItem.ShapeMode.BoundingRectShape)
+        self._bins.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self._scene.addItem(self._bins)
         self._field = QGraphicsPixmapItem()
         self._field.setZValue(5)
         self._field.setShapeMode(QGraphicsPixmapItem.ShapeMode.BoundingRectShape)
@@ -1354,6 +1476,7 @@ class MoodMap(QGraphicsView):
         self._field.setOpacity(0.06)
         self._regions.setOpacity(0.06)
         self._links.setOpacity(0.04)
+        self._bins.setOpacity(0.04)
         self._lens_color.setOpacity(0.16)
         self._route.setOpacity(0.2)
         for star in self._stars.values():
@@ -1372,6 +1495,7 @@ class MoodMap(QGraphicsView):
         self._field.setOpacity(0.0)
         self._regions.setOpacity(0.0)
         self._links.setOpacity(0.0)
+        self._bins.setOpacity(0.0)
         self._lens_color.setOpacity(0.0)
 
     def set_playing(self, playing: bool) -> None:
@@ -1650,6 +1774,10 @@ class MoodMap(QGraphicsView):
         self._links.setPixmap(links)
         self._links.setScale(1.0 / FIELD_SCALE)
         self._links.setPos(0, 0)
+        bins = QPixmap.fromImage(self._baked_bin_image())
+        self._bins.setPixmap(bins)
+        self._bins.setScale(1.0 / FIELD_SCALE)
+        self._bins.setPos(0, 0)
         self._field_sig = self._field_signature()
         self._ensure_regions()
 
@@ -1845,6 +1973,11 @@ class MoodMap(QGraphicsView):
         self._baked_links = image
         self._baked_link_key = self._link_cache_key
         return image
+
+    def _baked_bin_image(self) -> QImage:
+        """Unmarked shapes for songs the closer lines already join."""
+        groups = constellation_groups(self._link_cache)
+        return constellation_bin_image(groups, sky_haze(self._sky_band))
 
     def _rebuild_star_grid(self) -> None:
         grid: dict[tuple[int, int], list[tuple[int, QPointF]]] = {}
@@ -2168,6 +2301,7 @@ class MoodMap(QGraphicsView):
         for item in self._sky_chrome:
             item.setOpacity(chrome)
         self._links.setOpacity(chrome)
+        self._bins.setOpacity(chrome)
 
     def _ensure_interactive_star(self, tid: int) -> TrackStar | None:
         """Materialize one movable star (used for sky-mode click/drag)."""

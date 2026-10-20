@@ -27,6 +27,9 @@ from meridian.ui.mood_map import (
     MoodMap,
     TrackStar,
     _star_mag,
+    BIN_SPAN,
+    constellation_bin_image,
+    constellation_groups,
     constellation_segments,
     crowd_ids,
     duration_radius_scale,
@@ -540,6 +543,72 @@ def test_a_crowd_drops_its_halo(qapp) -> None:
     view._lod_band = -1
     view._sync_live_stars(force=True)
     assert view._stars[bright]._glow.isVisible()
+
+
+def test_closer_lines_gather_a_shape_and_a_long_line_does_not() -> None:
+    near = [
+        (0.0, 0.0, 30.0, 0.0, 30.0),
+        (30.0, 0.0, 58.0, 8.0, 29.0),
+        (58.0, 8.0, 40.0, 32.0, 30.0),
+        (40.0, 32.0, 8.0, 24.0, 33.0),
+    ]
+    far = [(0.0, 0.0, 0.0 + BIN_SPAN + 40.0, 0.0, BIN_SPAN + 40.0)]
+    other = [
+        (400.0, 400.0, 428.0, 400.0, 28.0),
+        (428.0, 400.0, 456.0, 412.0, 30.0),
+        (456.0, 412.0, 430.0, 434.0, 34.0),
+    ]
+    groups = constellation_groups(near + far + other)
+    assert len(groups) == 2
+    flat = {point for group in groups for point in group}
+    assert (0.0, 0.0) in flat
+    assert (400.0, 400.0) in flat
+    assert (round(BIN_SPAN + 40.0, 2), 0.0) not in flat
+    pile = [(400.0, 300.0, 402.0, 300.0, 2.0), (402.0, 300.0, 404.0, 301.0, 2.2)]
+    assert constellation_groups(pile) == []
+    image = constellation_bin_image(groups)
+    assert image.width() > 0
+    opaque = 0
+    for group in groups:
+        x, y = group[0]
+        color = image.pixelColor(int(round(x * 2)), int(round(y * 2)))
+        opaque += color.alpha()
+    assert opaque > 40
+
+
+def test_bins_leave_moods_put_and_fade_when_the_sky_dives(qapp) -> None:
+    view = MoodMap()
+    view.resize(640, 480)
+    spaced = [
+        _ranked(_track(index, valence=0.20 + step * 0.04, energy=0.78))
+        for index, step in enumerate((0, 1, 2, 3), start=1)
+    ]
+    pile = [
+        _ranked(_track(index, valence=0.62, energy=0.42))
+        for index in range(10, 16)
+    ]
+    stored = [(item.track.id, item.track.valence, item.track.energy) for item in spaced + pile]
+    view.set_tracks(spaced + pile, None)
+    for tid, valence, energy in stored:
+        assert view._ranked[tid].track.valence == valence
+        assert view._ranked[tid].track.energy == energy
+        pos = view._positions[tid]
+        assert pos.x() == pytest.approx(40 + valence * 720)
+        assert pos.y() == pytest.approx(560 - energy * 524)
+    assert view._links.zValue() > view._bins.zValue() > view._regions.zValue()
+    pix = view._bins.pixmap().toImage()
+    star = view._positions[1]
+    assert pix.pixelColor(int(round(star.x() * 2)), int(round(star.y() * 2))).alpha() > 20
+    knot = view._positions[10]
+    assert pix.pixelColor(int(round(knot.x() * 2)), int(round(knot.y() * 2))).alpha() == 0
+    view._user_zoom = 2.6
+    view._lod_band = -1
+    view._sync_live_stars(force=True)
+    assert view._bins.opacity() == pytest.approx(0.0)
+    view._user_zoom = 1.0
+    view._lod_band = -1
+    view._sync_live_stars(force=True)
+    assert view._bins.opacity() == pytest.approx(1.0)
 
 
 def test_crowd_ids_mark_a_pile_and_leave_a_lone_star() -> None:

@@ -40,6 +40,7 @@ Version stays **1.3.6**. This refresh makes the short listen more honest and the
 - The sky is tiled into unlabelled neighborhoods, with a dark line over the white pile. A crowded stack is sliced even when the songs share one dot, and a round pile is not cut into a square waffle. The finer picture is ready before the first dive. Dragging the lens, and the fall back to the whole sky, leave that picture alone until the fall settles. Constellation lines and pin rings sit above the tile borders. Daytime softens the lines with the rest of the sky.
 - Up close, the stars stay the size they were when you first dived in, and the faded pile and tile lines drop away. Songs that truly share one spot stay one dot with a count. A click lists their names, and the scroll wheel walks through them. The songs under the pointer and inside the lens are the ones that wake up.
 - A crowd no longer wears a glow. The soft halo stays on the song that is playing, on a pin, on the star under the pointer, and on songs that have room around them.
+- Songs a closer constellation line already joins gather into an unmarked shape. A long line stays a line. Songs piled on one spot stay a pile, and nothing on the map is moved.
 - The quarter grid is gone. The four corners carry colder or warmer light, and diving in fades the constellations and grows a name plus a role chip.
 
 ### What’s new (plain English)
