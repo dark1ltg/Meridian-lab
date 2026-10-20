@@ -269,6 +269,9 @@ LABEL_CAP = 48
 LIVE_STAR_CAP = 220          # max interactive stars while zoomed in
 # Songs closer than this share one dot. Zoom cannot pull an exact overlap apart.
 STACK_POINT = 1.0
+# A halo this close to this many other songs is what turns a pile into fog.
+CROWD_RADIUS = 18.0
+CROWD_NEIGHBORS = 6
 FIELD_SCALE = 2              # bake retina-ish starfield
 SCENE_W = 800
 SCENE_H = 600
@@ -326,6 +329,45 @@ def _fan_sites(chunk: np.ndarray, max_count: int) -> list[np.ndarray]:
     order = np.argsort(np.arctan2(delta[:, 1], delta[:, 0]))
     edges = np.linspace(0, count, groups + 1, dtype=np.int32)
     return [chunk[order[edges[i] : edges[i + 1]]].mean(axis=0).astype(np.float32) for i in range(groups)]
+
+
+def crowd_ids(
+    points: list[tuple[int, float, float]],
+    *,
+    radius: float = CROWD_RADIUS,
+    minimum: int = CROWD_NEIGHBORS,
+) -> set[int]:
+    """Ids with at least `minimum` other songs inside `radius` scene pixels."""
+    if len(points) <= minimum:
+        return set()
+    ids = [tid for tid, _x, _y in points]
+    pts = np.array([[x, y] for _tid, x, y in points], dtype=np.float32)
+    cell = float(radius)
+    buckets: dict[tuple[int, int], list[int]] = {}
+    for index, (x, y) in enumerate(pts):
+        buckets.setdefault((int(x // cell), int(y // cell)), []).append(index)
+    reach = cell * cell
+    crowded: set[int] = set()
+    for index, (x, y) in enumerate(pts):
+        cx, cy = int(x // cell), int(y // cell)
+        near = 0
+        for gx in range(cx - 1, cx + 2):
+            for gy in range(cy - 1, cy + 2):
+                for other in buckets.get((gx, gy), ()):
+                    if other == index:
+                        continue
+                    dx = float(pts[other, 0] - x)
+                    dy = float(pts[other, 1] - y)
+                    if dx * dx + dy * dy <= reach:
+                        near += 1
+                        if near >= minimum:
+                            crowded.add(ids[index])
+                            break
+                if ids[index] in crowded:
+                    break
+        if near >= minimum:
+            crowded.add(ids[index])
+    return crowded
 
 
 def neighborhood_sites(
@@ -943,6 +985,7 @@ class MoodMap(QGraphicsView):
         self.setScene(self._scene)
         self._ranked: dict[int, RankedTrack] = {}
         self._positions: dict[int, QPointF] = {}
+        self._crowd_ids: set[int] = set()
         self._current_id: int | None = None
         self._sky_band = "night"
         self._search_query = ""
@@ -1235,6 +1278,7 @@ class MoodMap(QGraphicsView):
                 self._sky_press_scene = None
                 self._sky_defer_pan = False
         self._rebuild_star_grid()
+        self._refresh_crowd()
         sig = self._field_signature()
         if sig != self._field_sig:
             self._field_sig = sig
@@ -1735,7 +1779,31 @@ class MoodMap(QGraphicsView):
             getattr(item.track, "timbre_flag", None),
             current=item.track.id == self._current_id,
         )
+        if (
+            item.track.id in self._crowd_ids
+            and item.track.id != self._current_id
+            and not item.track.pinned
+        ):
+            bloom = 0
         return radius, color, bloom
+
+    def _refresh_crowd(self) -> None:
+        self._crowd_ids = crowd_ids(
+            [(tid, pos.x(), pos.y()) for tid, pos in self._positions.items()]
+        )
+
+    def _keeps_glow(self, tid: int, item: RankedTrack) -> bool:
+        """A crowd loses its halo. The song playing, a pin, and the star under the pointer keep one."""
+        if tid == self._current_id or item.track.pinned:
+            return True
+        if tid not in self._crowd_ids:
+            return True
+        if self._pointer_scene is None:
+            return False
+        pos = self._positions.get(tid)
+        if pos is None:
+            return False
+        return hypot(pos.x() - self._pointer_scene.x(), pos.y() - self._pointer_scene.y()) <= CROWD_RADIUS
 
     def _constellation_segments(self) -> list[tuple[float, float, float, float, float]]:
         """Links for the baked sky. Reused while stars stay put, so a lens recolor is cheap."""
@@ -1975,6 +2043,7 @@ class MoodMap(QGraphicsView):
         v, e = self.pos_to_mood(star.pos())
         self._positions[star.ranked.track.id] = QPointF(star.pos())
         self._rebuild_star_grid()
+        self._refresh_crowd()
         self._rebuild_starfield()
         self._refresh_lens_colors()
         self._refresh_route()
@@ -2330,7 +2399,7 @@ class MoodMap(QGraphicsView):
             if labels_on and labeled < LABEL_CAP:
                 show_label = True
                 labeled += 1
-            star.set_lod(glow_a, show_label)
+            star.set_lod(glow_a if self._keeps_glow(rep, item) else 0.0, show_label)
             used.append(star)
         for tid in list(self._stars):
             if self._stars[tid] not in used:

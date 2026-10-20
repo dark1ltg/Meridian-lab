@@ -26,7 +26,9 @@ from meridian.ui.mood_map import (
     STAR_BODY_FLOOR_DENSE,
     MoodMap,
     TrackStar,
+    _star_mag,
     constellation_segments,
+    crowd_ids,
     duration_radius_scale,
     heartbeat_amount,
     night_body_radius,
@@ -491,6 +493,61 @@ def test_close_view_wakes_the_pile_under_the_pointer(qapp, monkeypatch) -> None:
     live_ids = set(view._stars)
     assert 9 not in live_ids
     assert live_ids & {1, 2}
+
+
+def test_a_crowd_drops_its_halo(qapp) -> None:
+    bright = next(i for i in range(20, 800) if _star_mag(i) > 0.95)
+    view = MoodMap()
+    view.resize(640, 480)
+    tracks = []
+    for n in range(8):
+        tid = 3 + n
+        x = 400 + (n % 3) * 6
+        y = 300 + (n // 3) * 6
+        tracks.append(
+            _ranked(
+                _track(
+                    tid,
+                    valence=(x - 40) / 720,
+                    energy=(560 - y) / 524,
+                    pinned=(tid == 4),
+                )
+            )
+        )
+    x, y = 412, 312
+    tracks.append(
+        _ranked(_track(bright, valence=(x - 40) / 720, energy=(560 - y) / 524))
+    )
+    tracks.append(_ranked(_track(2, valence=0.08, energy=0.9)))
+    view.set_tracks(tracks, 3)
+    assert bright in view._crowd_ids
+    assert 2 not in view._crowd_ids
+    assert view._night_star(view._ranked[3], False)[2] > 0
+    assert view._night_star(view._ranked[4], False)[2] > 0
+    assert view._night_star(view._ranked[bright], False)[2] == 0
+    view._crowd_ids.discard(bright)
+    assert view._night_star(view._ranked[bright], False)[2] > 0
+
+    view._refresh_crowd()
+    view._user_zoom = 4.0
+    view._lod_band = -1
+    view._pointer_scene = view.mood_to_pos(0.08, 0.9)
+    view._sync_live_stars(force=True)
+    plain = view._stars[bright]
+    assert not plain._glow.isVisible()
+    assert view._stars[3]._glow.isVisible()
+    view._pointer_scene = view._positions[bright]
+    view._lod_band = -1
+    view._sync_live_stars(force=True)
+    assert view._stars[bright]._glow.isVisible()
+
+
+def test_crowd_ids_mark_a_pile_and_leave_a_lone_star() -> None:
+    pile = [(i, 400.0, 300.0) for i in range(1, 9)]
+    pile.append((99, 80.0, 80.0))
+    marked = crowd_ids(pile)
+    assert set(range(1, 9)) <= marked
+    assert 99 not in marked
 
 
 def test_zooming_home_from_close_in_falls_back(qapp) -> None:
