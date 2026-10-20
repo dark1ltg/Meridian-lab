@@ -113,6 +113,60 @@ def test_region_image_keeps_the_axis_margin_clear() -> None:
     assert np.any((body[:, :, 0] < 80) & (body[:, :, 3] > 160))
 
 
+def _densest(points: np.ndarray, sites: np.ndarray) -> int:
+    dist = (points[:, None, 0] - sites[None, :, 0]) ** 2 + (
+        points[:, None, 1] - sites[None, :, 1]
+    ) ** 2
+    return int(np.bincount(dist.argmin(axis=1), minlength=len(sites)).max())
+
+
+def test_a_tight_knot_and_a_shared_dot_are_sliced() -> None:
+    rng = np.random.default_rng(7)
+    knot = np.column_stack(
+        [rng.normal(400, 3, 140), rng.normal(300, 3, 140)]
+    ).astype(np.float32)
+    sites = neighborhood_sites(knot, min_span=20, max_count=14, limit=2000)
+    assert len(sites) > 4
+    assert _densest(knot, sites) < 40
+    same = np.full((140, 2), [400.0, 300.0], dtype=np.float32)
+    shared = neighborhood_sites(same, min_span=20, max_count=14, limit=2000)
+    assert len(shared) > 4
+    assert float(np.ptp(shared[:, 0])) > 4.0
+
+
+def test_a_round_pile_is_not_a_square_waffle() -> None:
+    rng = np.random.default_rng(4)
+    pile = np.column_stack(
+        [rng.normal(400, 28, 500), rng.normal(300, 24, 500)]
+    ).astype(np.float32)
+    sites = neighborhood_sites(pile, min_span=20, max_count=14, limit=2000)
+    assert len(np.unique(np.round(sites[:, 0]))) > 15
+    assert len(np.unique(np.round(sites[:, 1]))) > 15
+
+
+def test_daytime_softens_tile_lines_and_a_pin_is_not_sliced() -> None:
+    points = np.array([[180.0, 160.0], [520.0, 420.0], [400.0, 300.0]], dtype=np.float32)
+    night = neighborhood_region_image(points, min_span=20, max_count=1, limit=900, haze=0.0)
+    day = neighborhood_region_image(points, min_span=20, max_count=1, limit=900, haze=1.0)
+    raw = np.frombuffer(night.constBits(), dtype=np.uint8, count=night.height() * night.bytesPerLine())
+    pixels = raw.reshape(night.height(), night.bytesPerLine() // 4, 4)
+    dark = np.argwhere((pixels[:, :, 0] < 80) & (pixels[:, :, 3] > 160))
+    assert len(dark) > 0
+    y, x = (int(dark[len(dark) // 2][0]), int(dark[len(dark) // 2][1]))
+    day_raw = np.frombuffer(day.constBits(), dtype=np.uint8, count=day.height() * day.bytesPerLine())
+    day_px = day_raw.reshape(day.height(), day.bytesPerLine() // 4, 4)
+    assert int(day_px[y, x, 3]) < int(pixels[y, x, 3])
+    scene = np.array([[x / FIELD_SCALE, y / FIELD_SCALE]], dtype=np.float32)
+    spared = neighborhood_region_image(
+        points, min_span=20, max_count=1, limit=900, protect=scene
+    )
+    spared_raw = np.frombuffer(
+        spared.constBits(), dtype=np.uint8, count=spared.height() * spared.bytesPerLine()
+    )
+    spared_px = spared_raw.reshape(spared.height(), spared.bytesPerLine() // 4, 4)
+    assert not (int(spared_px[y, x, 0]) < 80 and int(spared_px[y, x, 3]) > 160)
+
+
 def test_lens_move_reuses_tiles_and_a_dive_uses_finer_ones(qapp) -> None:
     sky = MoodMap()
     sky.resize(960, 720)
@@ -138,3 +192,20 @@ def test_lens_move_reuses_tiles_and_a_dive_uses_finer_ones(qapp) -> None:
     sky._lod_band = -1
     sky._sync_live_stars(force=True)
     assert sky._regions.opacity() == pytest.approx(1.0)
+    assert sky._region_fine is not None
+    assert sky._links.zValue() > sky._regions.zValue()
+    calls: list[object] = []
+    sky._regions.setPixmap = lambda pix: calls.append(pix)
+    sky._user_zoom = 2.6
+    sky.lens_moved()
+    assert calls == []
+    shown = sky._region_shown
+    sky._falling = True
+    for zoom in (2.4, 1.8, 1.2):
+        sky._user_zoom = zoom
+        sky._ensure_regions()
+    assert sky._region_shown is shown
+    sky._falling = False
+    sky._user_zoom = 1.0
+    sky._ensure_regions()
+    assert sky._region_shown is sky._region_coarse

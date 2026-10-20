@@ -273,15 +273,56 @@ SCENE_H = 600
 # A cell is a group of songs, so the white pile breaks into areas instead of slivers.
 REGION_COARSE_SPAN = 20.0
 REGION_COARSE_COUNT = 14
-REGION_COARSE_LIMIT = 900
+REGION_COARSE_LIMIT = 2000
 REGION_FINE_SPAN = 8.0
 REGION_FINE_COUNT = 3
-REGION_FINE_LIMIT = 2000
+REGION_FINE_LIMIT = 4000
 REGION_MARGIN = 28.0
 HIT_RADIUS_SKY = 14.0
 # Tighter than hover/snap — avoids turning a nearby pan into an accidental pin.
 HIT_RADIUS_SKY_GRAB = 7.0
 SKY_DRAG_SLOP = 8.0
+
+
+def _span_of(chunk: np.ndarray) -> float:
+    if chunk.shape[0] == 0:
+        return 0.0
+    return float(
+        max(
+            float(chunk[:, 0].max() - chunk[:, 0].min()),
+            float(chunk[:, 1].max() - chunk[:, 1].min()),
+        )
+    )
+
+
+def _jitter_site(center: np.ndarray) -> np.ndarray:
+    """Nudge a lone neighborhood so a round pile does not become graph paper."""
+    hx = int(round(float(center[0]) * 10.0))
+    hy = int(round(float(center[1]) * 10.0))
+    mix = (hx * 73856093) ^ (hy * 19349663)
+    ang = ((mix & 1023) / 1023.0) * (2.0 * pi)
+    mag = 1.2 + ((mix >> 10) & 255) / 255.0 * 2.2
+    return center + np.array([np.cos(ang), np.sin(ang)], dtype=np.float32) * np.float32(mag)
+
+
+def _fan_sites(chunk: np.ndarray, max_count: int) -> list[np.ndarray]:
+    """Slice a stack the grid could not split. Songs that share one dot get a ring of sites."""
+    count = int(chunk.shape[0])
+    groups = int(np.ceil(count / max(1, max_count)))
+    groups = max(2, min(16, groups))
+    center = chunk.mean(axis=0).astype(np.float32)
+    if _span_of(chunk) < 1.5:
+        radius = float(min(11.0, 3.6 + 1.15 * np.sqrt(groups)))
+        return [
+            center
+            + np.array([np.cos(ang), np.sin(ang)], dtype=np.float32) * np.float32(radius)
+            for index in range(groups)
+            for ang in (2.0 * pi * (index + 0.5) / groups,)
+        ]
+    delta = chunk - center
+    order = np.argsort(np.arctan2(delta[:, 1], delta[:, 0]))
+    edges = np.linspace(0, count, groups + 1, dtype=np.int32)
+    return [chunk[order[edges[i] : edges[i + 1]]].mean(axis=0).astype(np.float32) for i in range(groups)]
 
 
 def neighborhood_sites(
@@ -291,42 +332,39 @@ def neighborhood_sites(
     max_count: int,
     limit: int,
 ) -> np.ndarray:
-    """One site per neighborhood. Split crowded boxes, leave quiet sky in large cells."""
+    """One site per neighborhood. Crowded stacks get several sites so a line can cross them."""
     if points.size == 0:
         return np.zeros((0, 2), dtype=np.float32)
     pts = np.asarray(points, dtype=np.float32).reshape(-1, 2)
 
-    def split(span_now: float) -> list[np.ndarray]:
-        stack: list[tuple] = [(pts, 0.0, 0.0, float(SCENE_W), float(SCENE_H), 0)]
+    def split(span_now: float, budget: int) -> list[np.ndarray]:
+        stack: list[tuple[np.ndarray, int]] = [(pts, 0)]
         found: list[np.ndarray] = []
         while stack:
-            chunk, x0, y0, x1, y1, depth = stack.pop()
+            chunk, depth = stack.pop()
             count = int(chunk.shape[0])
             if count == 0:
                 continue
-            if count <= max_count or max(x1 - x0, y1 - y0) <= span_now or depth >= 10:
-                found.append(chunk.mean(axis=0))
+            center = chunk.mean(axis=0).astype(np.float32)
+            if count <= budget or _span_of(chunk) <= span_now or depth >= 12:
+                if count > budget:
+                    found.extend(_fan_sites(chunk, budget))
+                else:
+                    found.append(_jitter_site(center))
                 continue
-            mx = (x0 + x1) * 0.5
-            my = (y0 + y1) * 0.5
-            left = chunk[:, 0] < mx
-            upper = chunk[:, 1] < my
-            boxes = (
-                (left & upper, x0, y0, mx, my),
-                (~left & upper, mx, y0, x1, my),
-                (left & ~upper, x0, my, mx, y1),
-                (~left & ~upper, mx, my, x1, y1),
-            )
-            for mask, a, b, c, d in boxes:
-                if np.any(mask):
-                    stack.append((chunk[mask], a, b, c, d, depth + 1))
+            axis = int(np.argmax(chunk.max(axis=0) - chunk.min(axis=0)))
+            order = np.argpartition(chunk[:, axis], count // 2)
+            mid = count // 2
+            stack.append((chunk[order[mid:]], depth + 1))
+            stack.append((chunk[order[:mid]], depth + 1))
         return found
 
     span = float(min_span)
-    found = split(span)
-    while len(found) > limit and span < 160.0:
-        span *= 1.35
-        found = split(span)
+    budget = int(max_count)
+    found = split(span, budget)
+    while len(found) > limit and budget < 64:
+        budget = int(budget * 1.35) + 1
+        found = split(span, budget)
     if not found:
         return np.zeros((0, 2), dtype=np.float32)
     return np.vstack(found).astype(np.float32)
@@ -415,6 +453,8 @@ def neighborhood_region_image(
     min_span: float,
     max_count: int,
     limit: int,
+    haze: float = 0.0,
+    protect: np.ndarray | None = None,
 ) -> QImage:
     """Unlabelled mood tiles. Dark lines cut a white pile; light lines read on the night sky."""
     width = SCENE_W * FIELD_SCALE
@@ -428,13 +468,23 @@ def neighborhood_region_image(
     screen[:, 0] = sites[:, 0] * FIELD_SCALE
     screen[:, 1] = sites[:, 1] * FIELD_SCALE
     ids = _nearest_site_ids(screen, width, height)
+    haze = float(np.clip(haze, 0.0, 1.0))
+    soften = 1.0 - 0.68 * haze
+    mist = np.array([206.0, 214.0, 232.0], dtype=np.float32)
     valence = np.clip((sites[:, 0] - 40.0) / 720.0, 0.0, 1.0)
     energy = np.clip((560.0 - sites[:, 1]) / 524.0, 0.0, 1.0)
     fill = np.zeros((sites.shape[0], 4), dtype=np.uint8)
-    fill[:, 0] = np.clip(168 + 58 * valence, 0, 255)
-    fill[:, 1] = np.clip(162 + 24 * energy, 0, 255)
-    fill[:, 2] = np.clip(214 - 46 * valence + 16 * energy, 0, 255)
-    fill[:, 3] = 62
+    rgb = np.stack(
+        (
+            np.clip(168 + 58 * valence, 0, 255),
+            np.clip(162 + 24 * energy, 0, 255),
+            np.clip(214 - 46 * valence + 16 * energy, 0, 255),
+        ),
+        axis=1,
+    ).astype(np.float32)
+    rgb = rgb * (1.0 - 0.7 * haze) + mist * (0.7 * haze)
+    fill[:, :3] = np.clip(rgb, 0, 255).astype(np.uint8)
+    fill[:, 3] = np.uint8(np.clip(round(62 * soften), 18, 62))
     painted = fill[ids]
     image[:] = painted
     if sites.shape[0] > 1:
@@ -444,8 +494,37 @@ def neighborhood_region_image(
         thick = edge.copy()
         thick[:, 1:] |= edge[:, :-1]
         thick[1:, :] |= edge[:-1, :]
-        image[thick] = (232, 226, 255, 210)
-        image[edge] = (24, 16, 42, 185)
+        if protect is not None and len(protect):
+            radius = 8.0 * FIELD_SCALE
+            reach = int(radius) + 2
+            for sx, sy in np.asarray(protect, dtype=np.float32).reshape(-1, 2):
+                cx = float(sx) * FIELD_SCALE
+                cy = float(sy) * FIELD_SCALE
+                x0 = max(0, int(cx) - reach)
+                x1 = min(width, int(cx) + reach + 1)
+                y0 = max(0, int(cy) - reach)
+                y1 = min(height, int(cy) + reach + 1)
+                if x1 <= x0 or y1 <= y0:
+                    continue
+                xs = np.arange(x0, x1, dtype=np.float32)
+                ys = np.arange(y0, y1, dtype=np.float32)
+                disc = (xs[None, :] - cx) ** 2 + (ys[:, None] - cy) ** 2 <= radius * radius
+                edge[y0:y1, x0:x1] &= ~disc
+                thick[y0:y1, x0:x1] &= ~disc
+        light = (
+            int(232 * (1.0 - haze) + 206 * haze),
+            int(226 * (1.0 - haze) + 214 * haze),
+            int(255 * (1.0 - haze) + 232 * haze),
+            int(210 * soften),
+        )
+        dark = (
+            int(24 * (1.0 - haze) + 90 * haze),
+            int(16 * (1.0 - haze) + 98 * haze),
+            int(42 * (1.0 - haze) + 120 * haze),
+            int(185 * soften),
+        )
+        image[thick] = light
+        image[edge] = dark
     margin = int(REGION_MARGIN * FIELD_SCALE)
     if margin > 0:
         image[:margin, :, 3] = 0
@@ -861,6 +940,7 @@ class MoodMap(QGraphicsView):
         self._region_pos_key: tuple | None = None
         self._region_coarse: QPixmap | None = None
         self._region_fine: QPixmap | None = None
+        self._region_shown: QPixmap | None = None
         self._link_cache_key: tuple | None = None
         self._link_cache: list[tuple[float, float, float, float, float]] = []
         self._baked_link_key: tuple | None = None
@@ -883,7 +963,7 @@ class MoodMap(QGraphicsView):
         self._sky_bg = None
         self._draw_backdrop()
         self._links = QGraphicsPixmapItem()
-        self._links.setZValue(4)
+        self._links.setZValue(5.76)
         self._links.setShapeMode(QGraphicsPixmapItem.ShapeMode.BoundingRectShape)
         self._links.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         self._scene.addItem(self._links)
@@ -1472,10 +1552,28 @@ class MoodMap(QGraphicsView):
         self._ensure_regions()
 
     def _region_position_key(self) -> tuple:
-        return tuple(
+        protected = tuple(
+            sorted(
+                tid
+                for tid, item in self._ranked.items()
+                if item.track.pinned or item.track.loved
+            )
+        )
+        positions = tuple(
             (tid, round(self._positions[tid].x(), 1), round(self._positions[tid].y(), 1))
             for tid in sorted(self._positions)
         )
+        return (self._sky_band, protected, positions)
+
+    def _protected_region_points(self) -> np.ndarray:
+        pts = [
+            (self._positions[tid].x(), self._positions[tid].y())
+            for tid, item in self._ranked.items()
+            if tid in self._positions and (item.track.pinned or item.track.loved)
+        ]
+        if not pts:
+            return np.zeros((0, 2), dtype=np.float32)
+        return np.asarray(pts, dtype=np.float32)
 
     def _region_pixmap(self, *, fine: bool) -> QPixmap:
         if not self._positions:
@@ -1484,12 +1582,16 @@ class MoodMap(QGraphicsView):
             [[self._positions[tid].x(), self._positions[tid].y()] for tid in self._positions],
             dtype=np.float32,
         )
+        protect = self._protected_region_points()
+        haze = sky_haze(self._sky_band)
         if fine:
             image = neighborhood_region_image(
                 points,
                 min_span=REGION_FINE_SPAN,
                 max_count=REGION_FINE_COUNT,
                 limit=REGION_FINE_LIMIT,
+                haze=haze,
+                protect=protect,
             )
         else:
             image = neighborhood_region_image(
@@ -1497,32 +1599,39 @@ class MoodMap(QGraphicsView):
                 min_span=REGION_COARSE_SPAN,
                 max_count=REGION_COARSE_COUNT,
                 limit=REGION_COARSE_LIMIT,
+                haze=haze,
+                protect=protect,
             )
         return QPixmap.fromImage(image)
 
+    def _show_region_pixmap(self, pixmap: QPixmap) -> None:
+        if pixmap is self._region_shown:
+            return
+        self._region_shown = pixmap
+        self._regions.setPixmap(pixmap)
+        self._regions.setScale(1.0 / FIELD_SCALE)
+        self._regions.setPos(0, 0)
+        self._regions.setVisible(True)
+
     def _ensure_regions(self) -> None:
-        """Show neighborhood tiles. Positions bake them. Zoom only swaps coarse for fine."""
+        """Show neighborhood tiles. Positions bake both levels. Zoom only swaps them."""
         key = self._region_position_key()
         if key != self._region_pos_key:
             self._region_pos_key = key
             self._region_coarse = None
             self._region_fine = None
+            self._region_shown = None
         if not self._positions:
-            self._regions.setPixmap(QPixmap())
+            self._show_region_pixmap(QPixmap())
             return
+        if self._falling and self._region_shown is not None:
+            return
+        if self._region_coarse is None:
+            self._region_coarse = self._region_pixmap(fine=False)
+        if self._region_fine is None:
+            self._region_fine = self._region_pixmap(fine=True)
         zoomed = self._user_zoom >= LIVE_STARS_ZOOM and not self._zoom_active
-        if zoomed:
-            if self._region_fine is None:
-                self._region_fine = self._region_pixmap(fine=True)
-            pixmap = self._region_fine
-        else:
-            if self._region_coarse is None:
-                self._region_coarse = self._region_pixmap(fine=False)
-            pixmap = self._region_coarse
-        self._regions.setPixmap(pixmap)
-        self._regions.setScale(1.0 / FIELD_SCALE)
-        self._regions.setPos(0, 0)
-        self._regions.setVisible(True)
+        self._show_region_pixmap(self._region_fine if zoomed else self._region_coarse)
 
     def _night_star(self, item: RankedTrack, density: bool) -> tuple[float, QColor, int]:
         """Scene-pixel radius, quiet-sky color, and bloom alpha for one baked star."""
@@ -1865,7 +1974,6 @@ class MoodMap(QGraphicsView):
         self.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
         self.scale(self._user_zoom, self._user_zoom)
         self.centerOn(center)
-        self._ensure_regions()
         if self._search_query:
             self._apply_search_veil()
         else:
