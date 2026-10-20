@@ -187,11 +187,11 @@ def test_lens_move_reuses_tiles_and_a_dive_uses_finer_ones(qapp) -> None:
     assert sky._region_fine is not None
     assert sky._regions.pixmap().cacheKey() != coarse.cacheKey()
     sky.set_search_query("zzz-no-match")
-    assert sky._regions.opacity() == pytest.approx(0.06)
+    assert sky._regions.opacity() == pytest.approx(0.0)
     sky.set_search_query("")
     sky._lod_band = -1
     sky._sync_live_stars(force=True)
-    assert sky._regions.opacity() == pytest.approx(1.0)
+    assert sky._regions.opacity() == pytest.approx(0.0)
     assert sky._region_fine is not None
     assert sky._links.zValue() > sky._regions.zValue()
     calls: list[object] = []

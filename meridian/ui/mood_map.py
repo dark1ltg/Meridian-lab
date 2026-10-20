@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QGraphicsScene,
     QGraphicsSimpleTextItem,
     QGraphicsView,
+    QMenu,
     QPinchGesture,
 )
 
@@ -266,6 +267,8 @@ CLUSTER_GRID = 48.0
 LOD_DEFER_MS = 48
 LABEL_CAP = 48
 LIVE_STAR_CAP = 220          # max interactive stars while zoomed in
+# Songs closer than this share one dot. Zoom cannot pull an exact overlap apart.
+STACK_POINT = 1.0
 FIELD_SCALE = 2              # bake retina-ish starfield
 SCENE_W = 800
 SCENE_H = 600
@@ -574,6 +577,13 @@ class TrackStar(QGraphicsEllipseItem):
         self._label.setBrush(QBrush(QColor("#e8ecf7")))
         self._label.setFont(sans(10))
         self._label.hide()
+        self._count = QGraphicsSimpleTextItem(self)
+        self._count.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+        self._count.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self._count.setZValue(32)
+        self._count.setBrush(QBrush(QColor("#f7f4ff")))
+        self._count.setFont(sans(9, medium=True))
+        self._count.hide()
         self._role = QGraphicsSimpleTextItem(self)
         self._role.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
         self._role.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
@@ -581,8 +591,38 @@ class TrackStar(QGraphicsEllipseItem):
         self._role.setFont(sans(8, medium=True))
         self._role.hide()
         self._lod_key = (-1, False, False)
+        self._body_scale = 1.0
+        self._hovering = False
+        self._search_hot = False
+        self._stack_ids: list[int] = []
+        self._stack_focus_id: int | None = None
 
         self.apply_style(ranked, current=False)
+
+    def set_body_scale(self, scale: float, *, hot: bool | None = None) -> None:
+        """Keep a zoomed-in star the size it had at the dive. The map grows, the dot does not."""
+        self._body_scale = max(0.05, float(scale))
+        if hot is not None:
+            self._search_hot = hot
+        factor = 1.0
+        if self._hovering:
+            factor = 1.45
+        elif self._search_hot:
+            factor = 1.35
+        self.setScale(self._body_scale * factor)
+
+    def set_stack(self, ids: list[int]) -> None:
+        """One dot for songs that share a point, with a count when there is more than one."""
+        self._stack_ids = list(ids)
+        if len(self._stack_ids) < 2:
+            self._count.hide()
+            return
+        count = len(self._stack_ids)
+        self._count.setText(str(count) if count < 100 else "99+")
+        box = self._count.boundingRect()
+        radius = self.rect().width() * 0.5
+        self._count.setPos(radius * 0.15, -radius - box.height() * 0.15)
+        self._count.show()
 
     def shape(self) -> QPainterPath:
         # Live stars: hit close to the drawn body so dense clusters stay distinguishable.
@@ -755,11 +795,13 @@ class TrackStar(QGraphicsEllipseItem):
             self._role.hide()
 
     def hoverEnterEvent(self, event) -> None:
-        self.setScale(1.45)
+        self._hovering = True
+        self.set_body_scale(self._body_scale)
         super().hoverEnterEvent(event)
 
     def hoverLeaveEvent(self, event) -> None:
-        self.setScale(1.0)
+        self._hovering = False
+        self.set_body_scale(self._body_scale)
         super().hoverLeaveEvent(event)
 
     def itemChange(self, change, value):
@@ -791,6 +833,8 @@ class TrackStar(QGraphicsEllipseItem):
         self._press_scene = None
         if dragged:
             self._map.star_moved(self)
+        elif len(self._stack_ids) > 1 and self._map._user_zoom >= LIVE_STARS_ZOOM:
+            self._map.prompt_stack(self, event.screenPos())
         else:
             self._map.snap_lens_to_star(self)
 
@@ -919,6 +963,7 @@ class MoodMap(QGraphicsView):
         self._radius = LENS_RADIUS_DEFAULT
         self._radius_scale = 1.0  # mode bias; ring shows radius * scale
         self._user_zoom = VIEW_ZOOM_MIN
+        self._pointer_scene: QPointF | None = None
         self._zoom_target = VIEW_ZOOM_MIN
         self._zoom_anchor = QPoint()
         self._pinch_zoom0 = VIEW_ZOOM_MIN
@@ -954,6 +999,10 @@ class MoodMap(QGraphicsView):
         self._lod_timer.setSingleShot(True)
         self._lod_timer.setInterval(LOD_DEFER_MS)
         self._lod_timer.timeout.connect(self._flush_zoom_lod)
+        self._pointer_timer = QTimer(self)
+        self._pointer_timer.setSingleShot(True)
+        self._pointer_timer.setInterval(80)
+        self._pointer_timer.timeout.connect(self._sync_pointer_stars)
         self._life_timer = QTimer(self)
         self._life_timer.setInterval(33)
         self._life_timer.timeout.connect(self._tick_life)
@@ -1254,8 +1303,9 @@ class MoodMap(QGraphicsView):
     def _apply_search_veil(self) -> None:
         if not self._search_query:
             for star in self._stars.values():
-                if abs(star.scale() - 1.35) < 0.05:
-                    star.setScale(1.0)
+                if star._search_hot:
+                    star.set_body_scale(star._body_scale, hot=False)
+            self._hide_close_smear()
             return
         self._field.setOpacity(0.06)
         self._regions.setOpacity(0.06)
@@ -1265,12 +1315,20 @@ class MoodMap(QGraphicsView):
         for star in self._stars.values():
             if star.ranked.track.id in self._search_ids:
                 star.setOpacity(1.0)
-                if abs(star.scale() - 1.35) > 0.02:
-                    star.setScale(1.35)
+                star.set_body_scale(star._body_scale, hot=True)
             else:
                 star.setOpacity(0.05)
-                if abs(star.scale() - 1.0) > 0.02:
-                    star.setScale(1.0)
+                star.set_body_scale(star._body_scale, hot=False)
+        self._hide_close_smear()
+
+    def _hide_close_smear(self) -> None:
+        """Up close, drop the faded pile and the tile lines so the live stars stand alone."""
+        if self._user_zoom < LIVE_STARS_ZOOM or self._zoom_active or self._falling:
+            return
+        self._field.setOpacity(0.0)
+        self._regions.setOpacity(0.0)
+        self._links.setOpacity(0.0)
+        self._lens_color.setOpacity(0.0)
 
     def set_playing(self, playing: bool) -> None:
         """The heartbeat follows sound, not merely which song is loaded."""
@@ -1983,11 +2041,11 @@ class MoodMap(QGraphicsView):
         """Show the whole baked sky while zooming home, so the end does not blink."""
         locked = self._drag_locked_ids()
         for tid, star in self._stars.items():
+            star.set_body_scale(1.0, hot=False)
             if tid in locked:
                 continue
             star.hide()
-            if abs(star.scale() - 1.35) < 0.05:
-                star.setScale(1.0)
+            star.set_stack([])
         self._field.setOpacity(1.0)
         self._regions.setOpacity(1.0)
         self._lens_color.setOpacity(1.0)
@@ -2057,8 +2115,146 @@ class MoodMap(QGraphicsView):
             star.apply_style(item, current=tid == self._current_id)
         star.setPos(self._positions[tid])
         star.setZValue(40)
+        star.set_body_scale(1.0, hot=False)
+        star.set_stack([])
         star.show()
         return star
+
+    def _live_focus(self) -> QPointF:
+        """Where the close view should wake stars: under the pointer, else the middle of the view."""
+        if self._pointer_scene is not None:
+            view_pt = self.mapFromScene(self._pointer_scene)
+            if self.viewport().rect().contains(view_pt):
+                return self._pointer_scene
+        return self.mapToScene(self.viewport().rect().center())
+
+    def _live_priority(self, tid: int, item: RankedTrack, pos: QPointF, focus: QPointF, locked: set[int]) -> float:
+        distance = hypot(pos.x() - focus.x(), pos.y() - focus.y())
+        score = max(0.0, 2000.0 - distance)
+        if self.star_in_lens(pos):
+            score += 80.0
+        if item.track.loved:
+            score += 25.0
+        if tid == self._current_id:
+            score += 50.0
+        if item.track.pinned:
+            score += 15.0
+        if tid in locked:
+            score += 5000.0
+        score += float(item.fit) * 10.0
+        return score
+
+    def _order_stack(self, ids: list[int]) -> list[int]:
+        """Playing, then loved, then pinned, then the name."""
+
+        def sort_key(tid: int) -> tuple:
+            item = self._ranked[tid]
+            return (
+                0 if tid == self._current_id else 1,
+                0 if item.track.loved else 1,
+                0 if item.track.pinned else 1,
+                item.track.label.lower(),
+            )
+
+        return sorted((tid for tid in ids if tid in self._ranked), key=sort_key)
+
+    def _stack_representative(self, ids: list[int]) -> int:
+        for tid in ids:
+            star = self._stars.get(tid)
+            if star is not None and star._stack_focus_id in ids:
+                return int(star._stack_focus_id)
+        return self._order_stack(ids)[0]
+
+    def _close_groups(self, locked: set[int]) -> list[list[int]]:
+        """Songs in view, nearest the pointer first. Exact overlaps become one group."""
+        focus = self._live_focus()
+        vis = self.mapToScene(self.viewport().rect()).boundingRect()
+        vis.adjust(-60, -60, 60, 60)
+        scored: list[tuple[float, int, QPointF]] = []
+        for tid, pos in self._positions.items():
+            if not vis.contains(pos) and tid not in locked:
+                continue
+            item = self._ranked.get(tid)
+            if item is None:
+                continue
+            scored.append((self._live_priority(tid, item, pos, focus, locked), tid, pos))
+        scored.sort(key=lambda row: row[0], reverse=True)
+        pool = scored[: max(LIVE_STAR_CAP * 6, LIVE_STAR_CAP)]
+        seen = {tid for _score, tid, _pos in pool}
+        for score, tid, pos in scored:
+            if tid in locked and tid not in seen:
+                pool.append((score, tid, pos))
+                seen.add(tid)
+        groups: list[dict] = []
+        for _score, tid, pos in pool:
+            for group in groups:
+                if hypot(pos.x() - group["x"], pos.y() - group["y"]) <= STACK_POINT:
+                    group["ids"].append(tid)
+                    break
+            else:
+                groups.append({"x": pos.x(), "y": pos.y(), "ids": [tid]})
+        chosen = groups[:LIVE_STAR_CAP]
+        chosen_ids = {tid for group in chosen for tid in group["ids"]}
+        for group in groups[LIVE_STAR_CAP:]:
+            if any(tid in locked and tid not in chosen_ids for tid in group["ids"]):
+                chosen.append(group)
+                chosen_ids.update(group["ids"])
+        return [group["ids"] for group in chosen]
+
+    def _adopt_stack_focus(self, star: TrackStar, tid: int) -> None:
+        if tid not in self._ranked or tid not in star._stack_ids:
+            return
+        star._stack_focus_id = tid
+        old = star.ranked.track.id
+        if self._stars.get(old) is star:
+            del self._stars[old]
+        item = self._ranked[tid]
+        star.apply_style(item, current=tid == self._current_id)
+        star.set_stack(star._stack_ids)
+        self._stars[tid] = star
+        self.track_hovered.emit(item.track.label)
+        self.snap_lens_to_star(star)
+
+    def prompt_stack(self, star: TrackStar, screen_pos: QPointF) -> None:
+        """Click a piled dot: list the songs, playing and loved first."""
+        ids = [tid for tid in star._stack_ids if tid in self._ranked]
+        if len(ids) < 2:
+            self.snap_lens_to_star(star)
+            return
+        menu = QMenu(self)
+        for tid in self._order_stack(ids):
+            item = self._ranked[tid]
+            marks: list[str] = []
+            if tid == self._current_id:
+                marks.append("playing")
+            if item.track.loved:
+                marks.append("loved")
+            if item.track.pinned:
+                marks.append("pinned")
+            label = item.track.label
+            if marks:
+                label = f"{label}  ·  {' · '.join(marks)}"
+            action = menu.addAction(label)
+            action.setData(tid)
+        chosen = menu.exec(screen_pos.toPoint())
+        if chosen is None:
+            return
+        self._adopt_stack_focus(star, int(chosen.data()))
+
+    def step_stack(self, star: TrackStar, step: int) -> None:
+        """Wheel on a piled dot walks the name through the songs that share it."""
+        ids = self._order_stack([tid for tid in star._stack_ids if tid in self._ranked])
+        if len(ids) < 2:
+            return
+        current = star._stack_focus_id if star._stack_focus_id in ids else star.ranked.track.id
+        index = ids.index(current) if current in ids else 0
+        self._adopt_stack_focus(star, ids[(index + step) % len(ids)])
+
+    def _sync_pointer_stars(self) -> None:
+        if self._user_zoom < LIVE_STARS_ZOOM or self._falling or self._zoom_active:
+            return
+        self._lod_band = -1
+        self._sync_live_stars(force=True)
 
     def _sync_live_stars(self, *, force: bool = False) -> None:
         """Sky = baked field only. Zoomed in = sparse live stars in the viewport."""
@@ -2079,6 +2275,7 @@ class MoodMap(QGraphicsView):
                     # Keep drag position (may differ from DB after a mid-drag refresh).
                     if tid in self._positions:
                         star.setPos(self._positions[tid])
+                    star.set_body_scale(1.0, hot=False)
                     star.show()
                 else:
                     star.hide()
@@ -2090,69 +2287,56 @@ class MoodMap(QGraphicsView):
             self._apply_search_veil()
             return
 
-        # Fade the baked field slightly so live bodies read clearly.
-        self._field.setOpacity(0.35)
-        self._regions.setOpacity(1.0)
-        self._lens_color.setOpacity(0.22)
         self._route.setOpacity(0.85)
         self._ensure_regions()
-        vis = self.mapToScene(self.viewport().rect()).boundingRect()
-        vis.adjust(-60, -60, 60, 60)
         locked = self._drag_locked_ids()
-
-        # Prefer current / loved / high-fit tracks among those in view.
-        candidates: list[tuple[float, RankedTrack]] = []
-        for tid, pos in self._positions.items():
-            if not vis.contains(pos) and tid not in locked:
-                continue
-            item = self._ranked.get(tid)
-            if item is None:
-                continue
-            score = item.fit * 0.7 + item.importance * 0.3
-            if item.track.loved:
-                score += 0.5
-            if tid == self._current_id:
-                score += 1.0
-            if tid in locked:
-                score += 2.0
-            candidates.append((score, item))
-        candidates.sort(key=lambda x: x[0], reverse=True)
-        keep_ids = {item.track.id for _, item in candidates[:LIVE_STAR_CAP]}
-        keep_ids.update(locked & self._ranked.keys())
-
-        for tid in list(self._stars):
-            if tid not in keep_ids:
-                self._scene.removeItem(self._stars.pop(tid))
-
+        groups = self._close_groups(locked)
+        body = LIVE_STARS_ZOOM / max(zoom, LIVE_STARS_ZOOM)
         if zoom <= LOD_GLOW_START:
             glow_a = 0.0
         else:
             glow_a = min(1.0, (zoom - LOD_GLOW_START) / 2.4)
         labels_on = zoom >= LOD_LABEL_START
         labeled = 0
-        for _, item in candidates[:LIVE_STAR_CAP]:
-            tid = item.track.id
-            pos = self._positions[tid]
-            star = self._stars.get(tid)
+        used: list[TrackStar] = []
+        for ids in groups:
+            rep = self._stack_representative(ids)
+            item = self._ranked.get(rep)
+            if item is None:
+                continue
+            star = None
+            for tid in ids:
+                found = self._stars.get(tid)
+                if found is not None:
+                    star = found
+                    break
             if star is None:
                 star = TrackStar(item)
                 star._map = self
                 self._scene.addItem(star)
-                self._stars[tid] = star
+            for tid in list(self._stars):
+                if self._stars[tid] is star:
+                    del self._stars[tid]
+            self._stars[rep] = star
+            star.apply_style(item, current=rep == self._current_id)
+            star.set_stack(ids)
+            if rep in locked:
+                self._positions[rep] = QPointF(star.pos())
             else:
-                star.apply_style(item, current=tid == self._current_id)
-            if tid not in locked:
-                star.setPos(pos)
-            else:
-                # Preserve the in-progress drag; keep _positions aligned.
-                self._positions[tid] = QPointF(star.pos())
+                star.setPos(self._positions[rep])
+            star.set_body_scale(body, hot=star._search_hot)
             star.show()
             show_label = False
             if labels_on and labeled < LABEL_CAP:
                 show_label = True
                 labeled += 1
             star.set_lod(glow_a, show_label)
+            used.append(star)
+        for tid in list(self._stars):
+            if self._stars[tid] not in used:
+                self._scene.removeItem(self._stars.pop(tid))
         self._apply_search_veil()
+        self._hide_close_smear()
 
     def _anchor_point(self, view_pos: QPoint | QPointF) -> QPoint:
         return view_pos.toPoint() if isinstance(view_pos, QPointF) else QPoint(view_pos)
@@ -2244,6 +2428,16 @@ class MoodMap(QGraphicsView):
         self._native_zoom_clear = None
 
     def wheelEvent(self, event) -> None:
+        if self._user_zoom >= LIVE_STARS_ZOOM and not (
+            event.modifiers() & Qt.KeyboardModifier.ControlModifier
+        ):
+            star = self._track_star_from_item(self.itemAt(event.position().toPoint()))
+            if star is not None and len(star._stack_ids) > 1:
+                delta_y = event.angleDelta().y() or event.pixelDelta().y()
+                if delta_y:
+                    self.step_stack(star, -1 if delta_y > 0 else 1)
+                    event.accept()
+                    return
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             delta = event.angleDelta().y()
             if delta == 0:
@@ -2485,6 +2679,14 @@ class MoodMap(QGraphicsView):
         super().mouseDoubleClickEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
+        self._pointer_scene = self.mapToScene(event.position().toPoint())
+        if (
+            self._user_zoom >= LIVE_STARS_ZOOM
+            and not self._falling
+            and not self._zoom_active
+            and not event.buttons()
+        ):
+            self._pointer_timer.start()
         # Sky: convert a core-star press into drag-to-pin without a prior pan nudge.
         if (
             self._user_zoom < LIVE_STARS_ZOOM

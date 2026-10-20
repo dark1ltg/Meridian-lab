@@ -421,6 +421,78 @@ def test_playing_a_star_starts_a_ripple(qapp) -> None:
     assert view._ripple_neighbors
 
 
+def test_close_view_keeps_small_stars_and_hides_the_pile(qapp) -> None:
+    view = MoodMap()
+    view.resize(480, 360)
+    view.set_tracks([_ranked(_track(1, valence=0.4, energy=0.5))], None)
+    view._user_zoom = 6.0
+    view._lod_band = -1
+    view._sync_live_stars(force=True)
+    star = next(iter(view._stars.values()))
+    assert star.scale() == pytest.approx(2.4 / 6.0, abs=0.02)
+    assert view._field.opacity() == pytest.approx(0.0)
+    assert view._regions.opacity() == pytest.approx(0.0)
+    view._user_zoom = 2.4
+    view._lod_band = -1
+    view._sync_live_stars(force=True)
+    assert star.scale() == pytest.approx(1.0, abs=0.02)
+    view._user_zoom = 1.0
+    view._lod_band = -1
+    view._sync_live_stars(force=True)
+    assert view._field.opacity() == pytest.approx(1.0)
+    assert view._regions.opacity() == pytest.approx(1.0)
+
+
+def test_a_shared_point_stays_one_dot_with_a_count(qapp) -> None:
+    view = MoodMap()
+    view.resize(480, 360)
+    loved = _track(1, title="Loved One", valence=0.55, energy=0.45, loved=True)
+    plain = _track(2, title="Plain One", valence=0.55, energy=0.45)
+    other = _track(3, title="Elsewhere", valence=0.2, energy=0.8)
+    view.set_tracks(
+        [
+            _ranked(loved),
+            _ranked(plain),
+            _ranked(other),
+        ],
+        2,
+    )
+    view._pointer_scene = view.mood_to_pos(0.55, 0.45)
+    view._user_zoom = 4.0
+    view._lod_band = -1
+    view._sync_live_stars(force=True)
+    visible = [star for star in view._stars.values() if star.isVisible()]
+    piled = [star for star in visible if len(star._stack_ids) > 1]
+    assert len(piled) == 1
+    assert set(piled[0]._stack_ids) == {1, 2}
+    assert piled[0]._count.text() == "2"
+    assert piled[0]._count.isVisible()
+    ordered = view._order_stack([1, 2, 3])
+    assert ordered[0] == 2
+    assert ordered[1] == 1
+    view.step_stack(piled[0], 1)
+    assert piled[0].ranked.track.id in {1, 2}
+
+
+def test_close_view_wakes_the_pile_under_the_pointer(qapp, monkeypatch) -> None:
+    import meridian.ui.mood_map as mood_map
+
+    monkeypatch.setattr(mood_map, "LIVE_STAR_CAP", 1)
+    view = MoodMap()
+    view.resize(640, 480)
+    near = [_ranked(_track(i, title=f"Near {i}", valence=0.82, energy=0.78)) for i in (1, 2)]
+    far = _ranked(_track(9, title="Loved Far", valence=0.12, energy=0.15, loved=True))
+    view.set_tracks([*near, far], None)
+    view.set_lens(0.82, 0.78, 0.08)
+    view._pointer_scene = view.mood_to_pos(0.82, 0.78)
+    view._user_zoom = 4.0
+    view._lod_band = -1
+    view._sync_live_stars(force=True)
+    live_ids = set(view._stars)
+    assert 9 not in live_ids
+    assert live_ids & {1, 2}
+
+
 def test_zooming_home_from_close_in_falls_back(qapp) -> None:
     view = MoodMap()
     view.resize(480, 360)
