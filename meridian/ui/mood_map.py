@@ -269,10 +269,191 @@ LIVE_STAR_CAP = 220          # max interactive stars while zoomed in
 FIELD_SCALE = 2              # bake retina-ish starfield
 SCENE_W = 800
 SCENE_H = 600
+# Neighborhood tiles. Coarse on the whole sky, finer only after the dive.
+# A cell is a group of songs, so the white pile breaks into areas instead of slivers.
+REGION_COARSE_SPAN = 20.0
+REGION_COARSE_COUNT = 14
+REGION_COARSE_LIMIT = 900
+REGION_FINE_SPAN = 8.0
+REGION_FINE_COUNT = 3
+REGION_FINE_LIMIT = 2000
+REGION_MARGIN = 28.0
 HIT_RADIUS_SKY = 14.0
 # Tighter than hover/snap — avoids turning a nearby pan into an accidental pin.
 HIT_RADIUS_SKY_GRAB = 7.0
 SKY_DRAG_SLOP = 8.0
+
+
+def neighborhood_sites(
+    points: np.ndarray,
+    *,
+    min_span: float,
+    max_count: int,
+    limit: int,
+) -> np.ndarray:
+    """One site per neighborhood. Split crowded boxes, leave quiet sky in large cells."""
+    if points.size == 0:
+        return np.zeros((0, 2), dtype=np.float32)
+    pts = np.asarray(points, dtype=np.float32).reshape(-1, 2)
+
+    def split(span_now: float) -> list[np.ndarray]:
+        stack: list[tuple] = [(pts, 0.0, 0.0, float(SCENE_W), float(SCENE_H), 0)]
+        found: list[np.ndarray] = []
+        while stack:
+            chunk, x0, y0, x1, y1, depth = stack.pop()
+            count = int(chunk.shape[0])
+            if count == 0:
+                continue
+            if count <= max_count or max(x1 - x0, y1 - y0) <= span_now or depth >= 10:
+                found.append(chunk.mean(axis=0))
+                continue
+            mx = (x0 + x1) * 0.5
+            my = (y0 + y1) * 0.5
+            left = chunk[:, 0] < mx
+            upper = chunk[:, 1] < my
+            boxes = (
+                (left & upper, x0, y0, mx, my),
+                (~left & upper, mx, y0, x1, my),
+                (left & ~upper, x0, my, mx, y1),
+                (~left & ~upper, mx, my, x1, y1),
+            )
+            for mask, a, b, c, d in boxes:
+                if np.any(mask):
+                    stack.append((chunk[mask], a, b, c, d, depth + 1))
+        return found
+
+    span = float(min_span)
+    found = split(span)
+    while len(found) > limit and span < 160.0:
+        span *= 1.35
+        found = split(span)
+    if not found:
+        return np.zeros((0, 2), dtype=np.float32)
+    return np.vstack(found).astype(np.float32)
+
+
+def _nearest_site_ids(screen: np.ndarray, width: int, height: int) -> np.ndarray:
+    """Pixel → nearest site. Buckets first, then widen until the nearest site is inside the search."""
+    count = int(screen.shape[0])
+    ids = np.zeros((height, width), dtype=np.int32)
+    if count <= 1 or width <= 0 or height <= 0:
+        return ids
+    bucket = 64
+    n_bx = (width + bucket - 1) // bucket
+    n_by = (height + bucket - 1) // bucket
+    buckets: list[list[int]] = [[] for _ in range(n_bx * n_by)]
+    clipped_x = np.clip(screen[:, 0], 0, width - 1)
+    clipped_y = np.clip(screen[:, 1], 0, height - 1)
+    cell_x = np.minimum(clipped_x.astype(np.int32) // bucket, n_bx - 1)
+    cell_y = np.minimum(clipped_y.astype(np.int32) // bucket, n_by - 1)
+    for index, (cx, cy) in enumerate(zip(cell_x.tolist(), cell_y.tolist())):
+        buckets[int(cy) * n_bx + int(cx)].append(index)
+    max_radius = max(n_bx, n_by)
+
+    def gather(tx: int, ty: int, radius: int) -> list[int]:
+        found: list[int] = []
+        x0 = max(0, tx - radius)
+        x1 = min(n_bx - 1, tx + radius)
+        y0 = max(0, ty - radius)
+        y1 = min(n_by - 1, ty + radius)
+        for y in range(y0, y1 + 1):
+            row = y * n_bx
+            for x in range(x0, x1 + 1):
+                found.extend(buckets[row + x])
+        return found
+
+    for ty in range(n_by):
+        y0 = ty * bucket
+        y1 = min(height, y0 + bucket)
+        ys = np.arange(y0, y1, dtype=np.float32)
+        for tx in range(n_bx):
+            x0 = tx * bucket
+            x1 = min(width, x0 + bucket)
+            xs = np.arange(x0, x1, dtype=np.float32)
+            chosen: np.ndarray | None = None
+            radius = 1
+            while radius <= max_radius:
+                cand = gather(tx, ty, radius)
+                if not cand:
+                    radius += 1
+                    continue
+                cand_index = np.asarray(cand, dtype=np.int32)
+                pts = screen[cand_index]
+                dist = (xs[None, None, :] - pts[:, 0, None, None]) ** 2 + (
+                    ys[None, :, None] - pts[:, 1, None, None]
+                ) ** 2
+                local = dist.argmin(axis=0)
+                near = np.take_along_axis(dist, local[None, ...], axis=0)[0]
+                sx0 = max(0, (tx - radius) * bucket)
+                sx1 = min(width, (tx + radius + 1) * bucket)
+                sy0 = max(0, (ty - radius) * bucket)
+                sy1 = min(height, (ty + radius + 1) * bucket)
+                left = xs - sx0 if sx0 > 0 else np.full(xs.shape, np.inf)
+                right = sx1 - xs if sx1 < width else np.full(xs.shape, np.inf)
+                top = ys - sy0 if sy0 > 0 else np.full(ys.shape, np.inf)
+                bottom = sy1 - ys if sy1 < height else np.full(ys.shape, np.inf)
+                clearance = np.minimum(
+                    np.minimum(left, right)[None, :],
+                    np.minimum(top, bottom)[:, None],
+                )
+                if bool(np.all(near <= np.square(clearance) + 1e-3)):
+                    chosen = cand_index[local]
+                    break
+                radius += 1
+            if chosen is None:
+                dist = (xs[None, None, :] - screen[:, 0, None, None]) ** 2 + (
+                    ys[None, :, None] - screen[:, 1, None, None]
+                ) ** 2
+                chosen = dist.argmin(axis=0)
+            ids[y0:y1, x0:x1] = chosen
+    return ids
+
+
+def neighborhood_region_image(
+    points: np.ndarray,
+    *,
+    min_span: float,
+    max_count: int,
+    limit: int,
+) -> QImage:
+    """Unlabelled mood tiles. Dark lines cut a white pile; light lines read on the night sky."""
+    width = SCENE_W * FIELD_SCALE
+    height = SCENE_H * FIELD_SCALE
+    image = np.zeros((height, width, 4), dtype=np.uint8)
+    sites = neighborhood_sites(points, min_span=min_span, max_count=max_count, limit=limit)
+    if sites.shape[0] == 0:
+        qimg = QImage(image.data, width, height, int(image.strides[0]), QImage.Format.Format_RGBA8888)
+        return qimg.copy()
+    screen = np.empty_like(sites)
+    screen[:, 0] = sites[:, 0] * FIELD_SCALE
+    screen[:, 1] = sites[:, 1] * FIELD_SCALE
+    ids = _nearest_site_ids(screen, width, height)
+    valence = np.clip((sites[:, 0] - 40.0) / 720.0, 0.0, 1.0)
+    energy = np.clip((560.0 - sites[:, 1]) / 524.0, 0.0, 1.0)
+    fill = np.zeros((sites.shape[0], 4), dtype=np.uint8)
+    fill[:, 0] = np.clip(168 + 58 * valence, 0, 255)
+    fill[:, 1] = np.clip(162 + 24 * energy, 0, 255)
+    fill[:, 2] = np.clip(214 - 46 * valence + 16 * energy, 0, 255)
+    fill[:, 3] = 62
+    painted = fill[ids]
+    image[:] = painted
+    if sites.shape[0] > 1:
+        edge = np.zeros((height, width), dtype=bool)
+        edge[:, 1:] = ids[:, 1:] != ids[:, :-1]
+        edge[1:, :] |= ids[1:, :] != ids[:-1, :]
+        thick = edge.copy()
+        thick[:, 1:] |= edge[:, :-1]
+        thick[1:, :] |= edge[:-1, :]
+        image[thick] = (232, 226, 255, 210)
+        image[edge] = (24, 16, 42, 185)
+    margin = int(REGION_MARGIN * FIELD_SCALE)
+    if margin > 0:
+        image[:margin, :, 3] = 0
+        image[-margin:, :, 3] = 0
+        image[:, :margin, 3] = 0
+        image[:, -margin:, 3] = 0
+    qimg = QImage(image.data, width, height, int(image.strides[0]), QImage.Format.Format_RGBA8888)
+    return qimg.copy()
 
 
 class TrackStar(QGraphicsEllipseItem):
@@ -677,6 +858,9 @@ class MoodMap(QGraphicsView):
         # Press on star core — wait for move before pan vs pin (avoids viewport nudge).
         self._sky_defer_pan = False
         self._field_sig: object | None = None
+        self._region_pos_key: tuple | None = None
+        self._region_coarse: QPixmap | None = None
+        self._region_fine: QPixmap | None = None
         self._link_cache_key: tuple | None = None
         self._link_cache: list[tuple[float, float, float, float, float]] = []
         self._baked_link_key: tuple | None = None
@@ -708,8 +892,14 @@ class MoodMap(QGraphicsView):
         self._field.setShapeMode(QGraphicsPixmapItem.ShapeMode.BoundingRectShape)
         self._field.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         self._scene.addItem(self._field)
+        self._regions = QGraphicsPixmapItem()
+        # Above the baked stars and the lens pool, so the lines cut the white pile.
+        self._regions.setZValue(5.75)
+        self._regions.setShapeMode(QGraphicsPixmapItem.ShapeMode.BoundingRectShape)
+        self._regions.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self._scene.addItem(self._regions)
         self._route = QGraphicsPixmapItem()
-        self._route.setZValue(5.3)
+        self._route.setZValue(5.78)
         self._route.setShapeMode(QGraphicsPixmapItem.ShapeMode.BoundingRectShape)
         self._route.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         self._scene.addItem(self._route)
@@ -988,6 +1178,7 @@ class MoodMap(QGraphicsView):
                     star.setScale(1.0)
             return
         self._field.setOpacity(0.06)
+        self._regions.setOpacity(0.06)
         self._links.setOpacity(0.04)
         self._lens_color.setOpacity(0.16)
         self._route.setOpacity(0.2)
@@ -1278,6 +1469,60 @@ class MoodMap(QGraphicsView):
         self._links.setScale(1.0 / FIELD_SCALE)
         self._links.setPos(0, 0)
         self._field_sig = self._field_signature()
+        self._ensure_regions()
+
+    def _region_position_key(self) -> tuple:
+        return tuple(
+            (tid, round(self._positions[tid].x(), 1), round(self._positions[tid].y(), 1))
+            for tid in sorted(self._positions)
+        )
+
+    def _region_pixmap(self, *, fine: bool) -> QPixmap:
+        if not self._positions:
+            return QPixmap()
+        points = np.array(
+            [[self._positions[tid].x(), self._positions[tid].y()] for tid in self._positions],
+            dtype=np.float32,
+        )
+        if fine:
+            image = neighborhood_region_image(
+                points,
+                min_span=REGION_FINE_SPAN,
+                max_count=REGION_FINE_COUNT,
+                limit=REGION_FINE_LIMIT,
+            )
+        else:
+            image = neighborhood_region_image(
+                points,
+                min_span=REGION_COARSE_SPAN,
+                max_count=REGION_COARSE_COUNT,
+                limit=REGION_COARSE_LIMIT,
+            )
+        return QPixmap.fromImage(image)
+
+    def _ensure_regions(self) -> None:
+        """Show neighborhood tiles. Positions bake them. Zoom only swaps coarse for fine."""
+        key = self._region_position_key()
+        if key != self._region_pos_key:
+            self._region_pos_key = key
+            self._region_coarse = None
+            self._region_fine = None
+        if not self._positions:
+            self._regions.setPixmap(QPixmap())
+            return
+        zoomed = self._user_zoom >= LIVE_STARS_ZOOM and not self._zoom_active
+        if zoomed:
+            if self._region_fine is None:
+                self._region_fine = self._region_pixmap(fine=True)
+            pixmap = self._region_fine
+        else:
+            if self._region_coarse is None:
+                self._region_coarse = self._region_pixmap(fine=False)
+            pixmap = self._region_coarse
+        self._regions.setPixmap(pixmap)
+        self._regions.setScale(1.0 / FIELD_SCALE)
+        self._regions.setPos(0, 0)
+        self._regions.setVisible(True)
 
     def _night_star(self, item: RankedTrack, density: bool) -> tuple[float, QColor, int]:
         """Scene-pixel radius, quiet-sky color, and bloom alpha for one baked star."""
@@ -1620,6 +1865,7 @@ class MoodMap(QGraphicsView):
         self.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
         self.scale(self._user_zoom, self._user_zoom)
         self.centerOn(center)
+        self._ensure_regions()
         if self._search_query:
             self._apply_search_veil()
         else:
@@ -1635,8 +1881,10 @@ class MoodMap(QGraphicsView):
             if abs(star.scale() - 1.35) < 0.05:
                 star.setScale(1.0)
         self._field.setOpacity(1.0)
+        self._regions.setOpacity(1.0)
         self._lens_color.setOpacity(1.0)
         self._route.setOpacity(1.0)
+        self._ensure_regions()
         self._update_chrome(self._user_zoom)
         self._apply_search_veil()
 
@@ -1727,15 +1975,19 @@ class MoodMap(QGraphicsView):
                 else:
                     star.hide()
             self._field.setOpacity(1.0)
+            self._regions.setOpacity(1.0)
             self._lens_color.setOpacity(1.0)
             self._route.setOpacity(1.0)
+            self._ensure_regions()
             self._apply_search_veil()
             return
 
         # Fade the baked field slightly so live bodies read clearly.
         self._field.setOpacity(0.35)
+        self._regions.setOpacity(1.0)
         self._lens_color.setOpacity(0.22)
         self._route.setOpacity(0.85)
+        self._ensure_regions()
         vis = self.mapToScene(self.viewport().rect()).boundingRect()
         vis.adjust(-60, -60, 60, 60)
         locked = self._drag_locked_ids()
