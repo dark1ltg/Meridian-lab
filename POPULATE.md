@@ -4,7 +4,7 @@
 
 ## 1. File tree
 
-Lab `main` started from `dark1ltg/Meridian` at `b48f89d` and has moved on (night-sky experiments, a more honest short listen, and the slide and search-line on the map). History was not mirrored; lab commits stay on `main`. See [CHANGELOG.md](CHANGELOG.md).
+Lab `main` started from `dark1ltg/Meridian` at `b48f89d` and has moved on (night-sky experiments, a more honest short listen, the slide and search-line, and a sharper patch when you zoom in a little). History was not mirrored; lab commits stay on `main`. See [CHANGELOG.md](CHANGELOG.md).
 
 To replace this repo with a full history mirror later, from a machine logged in as **dark1ltg**:
 

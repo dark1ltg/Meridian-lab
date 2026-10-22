@@ -118,6 +118,7 @@ Rough / partial listens (seed-only, intro-only, end-only) can get nudged toward 
 While you listen, finishes and skips can gently nudge **unpinned** stars relative to where your lens is.  
 That nudge is drawn as a short slide. A pewter ghost stays on the old spot for about a second. Clicks follow the moving star. A press during the slide keeps the star on the sky. Constellation lines, neighborhood tiles, and the queue path aim at the new spot when the slide starts. A **pin does not slide**.  
 Choosing a search result moves the lens, which was already allowed. A short cool line shows the trip, then fades. That line is not the queue path. If the lens is already on that song, no line is drawn.  
+Zooming in a little, once the pinch has stopped, draws a sharper picture of the patch on screen. The wide view stays one picture of the whole sky. In close, that picture steps aside and the clickable stars take over. A sliding star is left out of the sharper picture.  
 The matrix and context queue use those positions to pick “what’s near the lens” — that’s ranking, not a brand-new analyze.
 
 ## Where the code lives (if you care)

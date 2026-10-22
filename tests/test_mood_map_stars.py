@@ -21,7 +21,11 @@ from meridian.library import Track
 from meridian.queue_engine import Quadrant, RankedTrack
 from meridian.ui.mood_map import (
     FIELD_SCALE,
+    LIVE_STARS_ZOOM,
     LOVED_RING_QCOLOR,
+    NEAR_PATCH_SCALE,
+    NEAR_PATCH_ZOOM,
+    SCENE_W,
     SKY_LINK_MAX,
     STAR_BODY_FLOOR,
     STAR_BODY_FLOOR_DENSE,
@@ -828,3 +832,131 @@ def test_search_corridor_is_not_the_queue_path(qapp) -> None:
     assert view._search_corridor is None
     view.set_lens(0.5, 0.5, 0.22)
     assert view.begin_search_corridor(0.5, 0.5) is False
+
+
+def _settle_zoom(view: MoodMap, zoom: float) -> None:
+    view.resize(800, 600)
+    view._user_zoom = 1.0
+    view._zoom_target = 1.0
+    view._zoom_active = False
+    view._panning = False
+    view._falling = False
+    view.fitInView(view._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+    if zoom > 1.01:
+        view._apply_zoom_level(zoom, view.viewport().rect().center())
+        view._lod_timer.stop()
+        view._zoom_active = False
+    view._lod_band = -1
+    view._sync_live_stars(force=True)
+
+
+def _patch_alpha(view: MoodMap, track_id: int) -> int:
+    rect = view._near_rect
+    assert rect is not None
+    pos = view._positions[track_id]
+    return _alpha_near(
+        view._near.pixmap().toImage(),
+        (pos.x() - rect.x()) * NEAR_PATCH_SCALE,
+        (pos.y() - rect.y()) * NEAR_PATCH_SCALE,
+        5,
+    )
+
+
+def test_wide_sky_stays_one_picture(qapp) -> None:
+    view = MoodMap()
+    view.set_tracks([_ranked(_track(1, valence=0.5, energy=0.5))], None)
+    _settle_zoom(view, 1.0)
+    assert view._near.isVisible() is False
+    assert view._field.opacity() == pytest.approx(1.0)
+
+
+def test_medium_zoom_draws_a_sharper_patch(qapp) -> None:
+    view = MoodMap()
+    view.set_tracks(
+        [
+            _ranked(_track(1, valence=0.5, energy=0.5, mood_confidence=0.9)),
+            _ranked(_track(2, valence=0.02, energy=0.02, mood_confidence=0.9)),
+        ],
+        None,
+    )
+    _settle_zoom(view, 2.0)
+    assert NEAR_PATCH_ZOOM <= view._user_zoom < LIVE_STARS_ZOOM
+    assert view._near.isVisible()
+    assert view._field.opacity() == pytest.approx(0.0)
+    assert view._near_rect is not None
+    assert view._near_rect.width() < SCENE_W - 1
+    assert _patch_alpha(view, 1) > 20
+    key = view._near.pixmap().cacheKey()
+    view._sync_near_patch()
+    assert view._near.pixmap().cacheKey() == key
+    view._begin_zoom_interaction()
+    assert view._near.isVisible() is False
+    assert view._field.opacity() == pytest.approx(1.0)
+    view._end_zoom_interaction()
+    view._sync_near_patch()
+    assert view._near.isVisible()
+    assert view._field.opacity() == pytest.approx(0.0)
+    view._panning = True
+    view._show_wide_stars()
+    assert view._near.isVisible() is False
+    assert view._field.opacity() == pytest.approx(1.0)
+    view._panning = False
+    view._sync_near_patch()
+    assert view._near.isVisible()
+
+
+def test_a_long_pan_redraws_the_sharper_patch(qapp) -> None:
+    view = MoodMap()
+    view.set_tracks([_ranked(_track(1, valence=0.5, energy=0.5))], None)
+    _settle_zoom(view, 2.0)
+    builds = {"n": 0}
+    real = view._rebuild_near_patch
+
+    def wrapped(seen) -> None:
+        builds["n"] += 1
+        real(seen)
+
+    view._rebuild_near_patch = wrapped
+    view._sync_near_patch()
+    assert builds["n"] == 0
+    view.centerOn(36, 40)
+    view._sync_near_patch()
+    assert builds["n"] == 1
+
+
+def test_close_zoom_and_search_drop_the_sharper_patch(qapp) -> None:
+    view = MoodMap()
+    view.set_tracks([_ranked(_track(1, title="Needle", valence=0.5, energy=0.5))], None)
+    _settle_zoom(view, 2.0)
+    view.set_search_query("needle")
+    assert view._near.isVisible() is False
+    assert view._field.opacity() < 0.2
+    view.set_search_query("")
+    assert view._near.isVisible()
+    assert view._field.opacity() == pytest.approx(0.0)
+    _settle_zoom(view, 3.0)
+    assert view._near.isVisible() is False
+    assert view._field.opacity() == pytest.approx(0.0)
+
+
+def test_sliding_star_is_left_out_of_the_sharper_patch(qapp) -> None:
+    view = MoodMap()
+    view.set_tracks(
+        [
+            _ranked(_track(1, valence=0.45, energy=0.5, mood_confidence=0.9)),
+            _ranked(_track(2, valence=0.55, energy=0.5, mood_confidence=0.9)),
+        ],
+        None,
+    )
+    assert view.begin_listen_ease(1, 0.45, 0.5, 0.7, 0.7)
+    view.set_tracks(
+        [
+            _ranked(_track(1, valence=0.7, energy=0.7, mood_confidence=0.9)),
+            _ranked(_track(2, valence=0.55, energy=0.5, mood_confidence=0.9)),
+        ],
+        None,
+    )
+    _settle_zoom(view, 2.0)
+    assert view._listen_ease is not None
+    assert _patch_alpha(view, 1) == 0
+    assert _patch_alpha(view, 2) > 20

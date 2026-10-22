@@ -29,7 +29,7 @@ LIBGL_ALWAYS_SOFTWARE=1 QT_OPENGL=software ./Meridian-x86_64.AppImage
 | [How Meridian listens](audio-analysis-pipeline.md) | How it takes a short listen of each song |
 | [How stars get placed](placement-pipeline.md) | How that listen (plus tags) becomes a spot on the map |
 
-The listen can refuse a fake pulse, remember speech, and keep a real fast tempo. On the sky, a confidence of zero stays a weak star, a finish or skip slides an unpinned star, and search draws a short trip line that is not the queue.
+The listen can refuse a fake pulse, remember speech, and keep a real fast tempo. On the sky, a confidence of zero stays a weak star, a finish or skip slides an unpinned star, and search draws a short trip line that is not the queue. A medium zoom, after the pinch stops, draws a sharper picture of the patch on screen. In close, the clickable stars take over.
 
 **Context queue tip:** moving the lens updates the listen matrix, but the playing context queue stays put until it replenishes or you press **Renew queue**. Renew asks for another selection from the *current* matrix — it is not a skip storm.
 

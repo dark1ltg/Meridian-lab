@@ -45,13 +45,14 @@ Version stays **1.3.6**. This refresh makes the short listen more honest and the
 
 ### Lab, after the 2026-10-18 release image
 
-These are on lab `main`. The local lab AppImage under `dist/` was rebuilt from that tree on 2026-10-21. The release asset linked above is still the 2026-10-18 build.
+These are on lab `main`. The local lab AppImage under `dist/` was rebuilt from that tree on 2026-10-22. The release asset linked above is still the 2026-10-18 build.
 
 - A beat that does not land on the heard hits is refused. A fast song whose tracker locked to half speed is checked against a double-time grid before that refusal. A refused pulse does not push Kinetic and does not take the BPM bonus. A tag BPM can still set the pace.
 - A mostly spoken window is remembered and can dim confidence. A borderline musical frame is not treated as speech. Quiet but even hits are not called faint. A melody that moves an octave can still count as one held tone.
 - A confidence of exactly zero draws as a weak pewter star. A missing confidence still draws as the neutral middle.
 - After a finish or a skip, that one unpinned star slides from a pewter ghost to its new spot. Clicks follow it. A press during the slide puts the star back on the sky. Constellation lines, neighborhood tiles, and the queue path aim at the new spot when the slide starts. A pin does not slide.
 - Choosing a search result draws a short cool line from where the lens was to that song, then the line fades. It is not the queue path. If the lens is already on that song, no line is drawn.
+- Zooming in a little, once the pinch has stopped, draws a sharper picture of only the patch on screen. The wide view stays the one picture of the whole sky. A short pan reuses that sharper picture. In close, it steps aside and the clickable stars take over. Search still blacks out the sky. A star that is sliding is left out of the sharper picture, so the moving star is drawn once.
 
 ### What’s new (plain English)
 

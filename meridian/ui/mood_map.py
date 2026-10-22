@@ -385,6 +385,11 @@ VIEW_WHEEL_FACTOR = 1.06
 VIEW_NATIVE_OUTLIER = 1.25
 # Below this zoom, stars are one baked texture (smooth pinch). Above: live items in view.
 LIVE_STARS_ZOOM = 2.4
+# From here until the live stars, one sharper picture of the patch on screen.
+# Built after the pinch stops. The wide picture covers the gesture itself.
+NEAR_PATCH_ZOOM = 1.6
+NEAR_PATCH_SCALE = 4        # pixels per scene unit; the wide bake is FIELD_SCALE
+NEAR_PATCH_MARGIN = 0.35    # extra around the view so a short pan reuses the picture
 LOD_LABEL_START = 2.6
 LOD_GLOW_START = 2.4
 # Wide-sky furniture (weather, cross, axis labels, constellations) is gone
@@ -1085,7 +1090,7 @@ class SkyLifeOverlay(QGraphicsItem):
 
 
 class MoodMap(QGraphicsView):
-    """Mood sky: baked starfield for smooth pinch; live stars only when zoomed in."""
+    """Mood sky: one wide picture, a sharper patch after a medium zoom, live stars in close."""
 
     lens_changed = Signal(float, float, float)
     track_pinned = Signal(int, float, float)
@@ -1157,6 +1162,8 @@ class MoodMap(QGraphicsView):
         # Press on star core — wait for move before pan vs pin (avoids viewport nudge).
         self._sky_defer_pan = False
         self._field_sig: object | None = None
+        self._near_rect: QRectF | None = None
+        self._near_sig: object | None = None
         self._region_pos_key: tuple | None = None
         self._region_coarse: QPixmap | None = None
         self._region_fine: QPixmap | None = None
@@ -1202,6 +1209,13 @@ class MoodMap(QGraphicsView):
         self._field.setShapeMode(QGraphicsPixmapItem.ShapeMode.BoundingRectShape)
         self._field.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         self._scene.addItem(self._field)
+        # Sharper stars for a medium zoom. Above the wide picture, under the tiles.
+        self._near = QGraphicsPixmapItem()
+        self._near.setZValue(5.05)
+        self._near.setShapeMode(QGraphicsPixmapItem.ShapeMode.BoundingRectShape)
+        self._near.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self._near.hide()
+        self._scene.addItem(self._near)
         self._regions = QGraphicsPixmapItem()
         # Above the baked stars and the lens pool, so the lines cut the white pile.
         self._regions.setZValue(5.75)
@@ -1742,6 +1756,7 @@ class MoodMap(QGraphicsView):
             self._stamp_eased_star(tid)
             self._rebuild_star_grid()
             self._field_sig = self._field_signature()
+            self._sync_near_patch()
             return
         now = monotonic()
         if now >= until:
@@ -1754,6 +1769,7 @@ class MoodMap(QGraphicsView):
             self._rebuild_star_grid()
             self._refresh_lens_colors()
             self._field_sig = self._field_signature()
+            self._sync_near_patch()
             return
         t = ease_amount(now - t0, until - t0)
         pos = QPointF(
@@ -1933,6 +1949,63 @@ class MoodMap(QGraphicsView):
                 locked.add(tid)
         return locked
 
+    def _baked_star_order(self) -> list[RankedTrack]:
+        """Dim stars first, so a trusted one reads on top."""
+
+        def _conf_band(item: RankedTrack) -> int:
+            if item.track.pinned:
+                return 2
+            confidence = read_mood_confidence(item.track)
+            if confidence >= CONFIDENCE_HIGH:
+                return 2
+            if confidence >= CONFIDENCE_LOW:
+                return 1
+            return 0
+
+        return sorted(
+            self._ranked.values(),
+            key=lambda item: (
+                _conf_band(item),
+                STAR_Z[item.quadrant] + (2 if item.track.loved else 0),
+            ),
+        )
+
+    def _paint_star_layer(self, painter: QPainter, clip: QRectF | None) -> None:
+        """Quiet stars in scene coordinates. ``clip`` limits the work to one patch."""
+        order = self._baked_star_order()
+        density_mode = len(self._ranked) > 1200
+        reach = None if clip is None else clip.adjusted(-28.0, -28.0, 28.0, 28.0)
+        if density_mode and order:
+            cell = 10.0
+            counts: dict[tuple[int, int], int] = {}
+            for item in order:
+                pos = self._model_pos(item.track.id)
+                key = (int(pos.x() // cell), int(pos.y() // cell))
+                counts[key] = counts.get(key, 0) + 1
+            painter.setPen(Qt.PenStyle.NoPen)
+            for (cx, cy), count in counts.items():
+                if count < 3:
+                    continue
+                center = QPointF(cx * cell + cell * 0.5, cy * cell + cell * 0.5)
+                if reach is not None and not reach.contains(center):
+                    continue
+                # log2 so a 500-stack glows without blowing out the whole map.
+                alpha = min(72, 12 + int(14 * log2(count)))
+                painter.setBrush(QBrush(QColor(176, 156, 220, alpha)))
+                radius = 4.0 + min(10.0, count * 0.05)
+                painter.drawEllipse(center, radius, radius)
+        easing_id = self._listen_ease[0] if self._listen_ease is not None else None
+        painter.setPen(Qt.PenStyle.NoPen)
+        for item in order:
+            if item.track.id == easing_id:
+                continue
+            pos = self._positions.get(item.track.id)
+            if pos is None:
+                continue
+            if reach is not None and not reach.contains(pos):
+                continue
+            self._paint_baked_star(painter, item, pos, density_mode)
+
     def _rebuild_starfield(self) -> None:
         """Bake every track into one pixmap — pinch then only scales this texture."""
         w, h = SCENE_W * FIELD_SCALE, SCENE_H * FIELD_SCALE
@@ -1941,56 +2014,7 @@ class MoodMap(QGraphicsView):
         painter = QPainter(img)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.scale(FIELD_SCALE, FIELD_SCALE)
-        painter.setPen(Qt.PenStyle.NoPen)
-        n_ranked = len(self._ranked)
-        # Large libraries: a soft milky-way knot instead of shrinking stars away.
-        density_mode = n_ranked > 1200
-
-        # Draw lower-confidence stars first so bright / high-trust read on top.
-        def _conf_band(r: RankedTrack) -> int:
-            if r.track.pinned:
-                return 2
-            c = read_mood_confidence(r.track)
-            if c >= CONFIDENCE_HIGH:
-                return 2
-            if c >= CONFIDENCE_LOW:
-                return 1
-            return 0
-
-        order = sorted(
-            self._ranked.values(),
-            key=lambda r: (
-                _conf_band(r),
-                STAR_Z[r.quadrant] + (2 if r.track.loved else 0),
-            ),
-        )
-        # Cheap density underlay so stacked cohorts read as a faint cloud, not emptiness.
-        if density_mode and n_ranked:
-            cell = 10.0
-            counts: dict[tuple[int, int], int] = {}
-            for item in order:
-                pos = self._model_pos(item.track.id)
-                key = (int(pos.x() // cell), int(pos.y() // cell))
-                counts[key] = counts.get(key, 0) + 1
-            for (cx, cy), count in counts.items():
-                if count < 3:
-                    continue
-                # log2 so a 500-stack glows without blowing out the whole map.
-                alpha = min(72, 12 + int(14 * log2(count)))
-                glow = QColor(176, 156, 220, alpha)
-                painter.setBrush(QBrush(glow))
-                radius = 4.0 + min(10.0, count * 0.05)
-                painter.drawEllipse(
-                    QPointF(cx * cell + cell * 0.5, cy * cell + cell * 0.5),
-                    radius,
-                    radius,
-                )
-        painter.setPen(Qt.PenStyle.NoPen)
-        easing_id = self._listen_ease[0] if self._listen_ease is not None else None
-        for item in order:
-            if item.track.id == easing_id:
-                continue
-            self._paint_baked_star(painter, item, self._positions[item.track.id], density_mode)
+        self._paint_star_layer(painter, None)
         painter.end()
         pix = QPixmap.fromImage(img)
         self._field.setPixmap(pix)
@@ -2006,7 +2030,89 @@ class MoodMap(QGraphicsView):
         self._bins.setScale(1.0 / FIELD_SCALE)
         self._bins.setPos(0, 0)
         self._field_sig = self._field_signature()
+        self._near_sig = None
         self._ensure_regions()
+        self._sync_near_patch()
+
+    def _hide_near_patch(self) -> None:
+        self._near.hide()
+        self._near.setOpacity(0.0)
+
+    def _visible_scene_rect(self) -> QRectF:
+        return self.mapToScene(self.viewport().rect()).boundingRect()
+
+    def _near_patch_active(self) -> bool:
+        """The sharper picture is for a settled medium zoom, not a pinch or a search."""
+        if self._falling or self._zoom_active or self._panning or self._search_query:
+            return False
+        return NEAR_PATCH_ZOOM <= self._user_zoom < LIVE_STARS_ZOOM
+
+    def _patch_rect_for(self, view: QRectF) -> QRectF:
+        margin_x = view.width() * NEAR_PATCH_MARGIN
+        margin_y = view.height() * NEAR_PATCH_MARGIN
+        rect = view.adjusted(-margin_x, -margin_y, margin_x, margin_y)
+        return rect.intersected(QRectF(0, 0, SCENE_W, SCENE_H))
+
+    def _near_cache_covers(self, view: QRectF) -> bool:
+        cached = self._near_rect
+        if (
+            cached is None
+            or self._near_sig != self._field_sig
+            or self._near.pixmap().isNull()
+        ):
+            return False
+        slack = 12.0
+        inner = cached.adjusted(slack, slack, -slack, -slack)
+        if inner.width() < 4.0 or inner.height() < 4.0:
+            return cached.contains(view)
+        return inner.contains(view)
+
+    def _rebuild_near_patch(self, view: QRectF) -> None:
+        """One sharper picture of the patch on screen. Same stars, same places."""
+        rect = self._patch_rect_for(view)
+        if rect.width() < 8.0 or rect.height() < 8.0:
+            self._hide_near_patch()
+            return
+        width = max(1, int(round(rect.width() * NEAR_PATCH_SCALE)))
+        height = max(1, int(round(rect.height() * NEAR_PATCH_SCALE)))
+        image = QImage(width, height, QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.scale(NEAR_PATCH_SCALE, NEAR_PATCH_SCALE)
+        painter.translate(-rect.x(), -rect.y())
+        self._paint_star_layer(painter, rect)
+        painter.end()
+        self._near.setPixmap(QPixmap.fromImage(image))
+        self._near.setScale(1.0 / NEAR_PATCH_SCALE)
+        self._near.setPos(rect.topLeft())
+        self._near_rect = rect
+        self._near_sig = self._field_sig
+
+    def _show_wide_stars(self) -> None:
+        """Pinch and pan keep the one whole-sky picture until the gesture stops."""
+        self._hide_near_patch()
+        if self._search_query or self._user_zoom >= LIVE_STARS_ZOOM:
+            return
+        self._field.setOpacity(1.0)
+
+    def _sync_near_patch(self) -> None:
+        if not self._near_patch_active():
+            self._hide_near_patch()
+            return
+        view = self._visible_scene_rect().intersected(QRectF(0, 0, SCENE_W, SCENE_H))
+        if view.width() < 8.0 or view.height() < 8.0:
+            self._hide_near_patch()
+            return
+        if not self._near_cache_covers(view):
+            self._rebuild_near_patch(view)
+        if self._near.pixmap().isNull():
+            self._hide_near_patch()
+            return
+        # The sharp stars replace the wide ones. Tiles, lines, and the lens stay.
+        self._field.setOpacity(0.0)
+        self._near.setOpacity(1.0)
+        self._near.show()
 
     def _region_position_key(self) -> tuple:
         protected = tuple(
@@ -2482,6 +2588,7 @@ class MoodMap(QGraphicsView):
         self._regions.setOpacity(1.0)
         self._lens_color.setOpacity(1.0)
         self._route.setOpacity(1.0)
+        self._hide_near_patch()
         self._ensure_regions()
         self._update_chrome(self._user_zoom)
         self._apply_search_veil()
@@ -2500,6 +2607,7 @@ class MoodMap(QGraphicsView):
             return
         self._zoom_active = True
         self._cluster_once = True
+        self._show_wide_stars()
         # Hide live stars during the gesture — keep an in-progress pin visible.
         locked = self._drag_locked_ids()
         for tid, star in self._stars.items():
@@ -2718,6 +2826,7 @@ class MoodMap(QGraphicsView):
             self._route.setOpacity(1.0)
             self._ensure_regions()
             self._apply_search_veil()
+            self._sync_near_patch()
             return
 
         self._route.setOpacity(0.85)
@@ -2770,6 +2879,7 @@ class MoodMap(QGraphicsView):
                 self._scene.removeItem(self._stars.pop(tid))
         self._apply_search_veil()
         self._hide_close_smear()
+        self._sync_near_patch()
 
     def _anchor_point(self, view_pos: QPoint | QPointF) -> QPoint:
         return view_pos.toPoint() if isinstance(view_pos, QPointF) else QPoint(view_pos)
@@ -3004,11 +3114,13 @@ class MoodMap(QGraphicsView):
             )
             self._hand_drag_armed = False
             super().mouseReleaseEvent(release)
+        self._sync_near_patch()
 
     def _begin_hand_pan(self, event) -> None:
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self._panning = True
         self._hand_drag_armed = True
+        self._show_wide_stars()
         super().mousePressEvent(event)
 
     def mousePressEvent(self, event) -> None:
