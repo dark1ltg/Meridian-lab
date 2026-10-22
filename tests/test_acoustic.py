@@ -147,12 +147,38 @@ def test_onset_stats_keeps_a_landed_pulse_and_drops_a_fake_one() -> None:
 
     bpm, stats = onset_stats(_bursts(90.0, regular=True))
     assert bpm is not None
+    assert abs(float(bpm) - 90.0) / 90.0 < 0.12
     assert stats["pulse_rejected"] == 0.0
     assert stats["beat_alignment"] >= 0.55
+
+    for fast in (120.0, 140.0, 174.0):
+        fast_bpm, fast_stats = onset_stats(_bursts(fast, regular=True))
+        assert fast_bpm is not None
+        assert abs(float(fast_bpm) - fast) / fast < 0.12
+        assert fast_stats["pulse_rejected"] == 0.0
 
     fake_bpm, fake_stats = onset_stats(_bursts(90.0, regular=False))
     assert fake_bpm is None
     assert fake_stats["pulse_rejected"] == 1.0
+
+
+def test_onset_strength_ratio_ignores_quiet_but_even_hits() -> None:
+    from meridian.acoustic import onset_strength_ratio
+
+    even_quiet = onset_strength_ratio([16.0, 15.0, 17.0, 16.5])
+    mixed = onset_strength_ratio([12.0, 14.0, 11.0, 4000.0])
+    assert even_quiet is not None and even_quiet > 0.8
+    assert mixed is not None and mixed < 0.15
+    assert onset_strength_ratio([1.0, 2.0, 3.0]) is None
+
+
+def test_clear_speech_ignores_a_borderline_musical_frame() -> None:
+    from meridian.acoustic import is_clear_speech_frame, is_dialogue_frame
+
+    bands = {"mid": 0.4, "high_mid": 0.2, "bass": 0.1, "low_mid": 0.1, "high": 0.1}
+    assert is_dialogue_frame(periodicity=0.22, zcr=0.12, bands=bands, harmonicity=0.3)
+    assert not is_clear_speech_frame(periodicity=0.22, zcr=0.12, bands=bands, harmonicity=0.3)
+    assert is_clear_speech_frame(periodicity=0.08, zcr=0.12, bands=bands, harmonicity=0.2)
 
 
 def test_onset_stats_rejects_spurious_bpm() -> None:

@@ -18,15 +18,22 @@ SAMPLERATE = 11025
 BEAT_ALIGN_MIN = 0.55
 # Aubio tempo confidence below this is an unsure tracker. A sure-but-wrong tempo can still score high.
 TEMPO_CONF_MIN = 0.25
-# Median thresholded onset strength below this: the hits that fired were faint.
-FAINT_ONSET_MAX = 200.0
+# Double-time wins only when it matches the hits clearly better than the reported grid.
+DOUBLE_TEMPO_MARGIN = 0.20
+# Fixed on-beat slack so a fast true grid is not failed by a small lag.
+ALIGN_LAG_FLOOR = 0.11
+# Hit-strength ratio (median / strong hits) below this: the typical hit was faint.
+FAINT_ONSET_MAX = 0.15
 # Autocorr peak must clear this or Glow stays on brightness.
 PITCH_PEAK_CLEAR = 0.50
-# Relative spread, or max/min span, above which the note did not hold still.
-PITCH_WANDER_REL = 0.12
-PITCH_WANDER_SPAN = 1.5
-# Most of the local windows were spoken.
+# After octave folding, leftover spread above this is a broken pitch, not a melody.
+PITCH_WANDER_REL = 0.45
+PITCH_WANDER_SPAN = 3.0
+# Most of the local windows were clearly spoken.
 SPEECH_SHARE_MOST = 0.50
+# Stricter than the dialogue drop: a musical frame the drop already flags must not dim the score.
+CLEAR_SPEECH_PERIOD_MAX = 0.18
+CLEAR_SPEECH_HARM_MAX = 0.45
 
 
 @dataclass
@@ -61,9 +68,11 @@ class AcousticProfile:
     sub_bass: float = 0.0
     zcr: float = 0.0
     # Listen leftovers. None / False means "not judged", so old profiles stay put.
-    # Fraction of local windows that were spoken. Placement already dropped them.
+    # Fraction of local windows that were clearly spoken. Placement already dropped them.
     speech_share: float = 0.0
-    # Median thresholded onset strength. None when there were too few hits to judge.
+    # Windows heard before the dialogue drop. 0 means "use window_count".
+    heard_windows: int = 0
+    # Median hit strength divided by the strong hits. None when there were too few hits to judge.
     onset_strength: float | None = None
     # Aubio's own tempo certainty. None when the tracker was not read.
     tempo_confidence: float | None = None
@@ -325,28 +334,55 @@ def normalize_pitch_glow(pitch_hz: float) -> float:
     return float(np.clip(mapped, 0.05, 0.95))
 
 
-def pitch_holds(hz_values: list[float], peaks: list[float]) -> bool:
-    """True when the accepted F0s are one clear note, not a wander or a weak peak.
+def _fold_octaves(hz_values: list[float]) -> np.ndarray:
+    """Pull each F0 into the octave nearest the median so 220 and 440 agree."""
+    hz = np.asarray(hz_values, dtype=np.float64)
+    target = float(np.median(hz))
+    if not np.isfinite(target) or target <= 1.0:
+        return hz
+    folded: list[float] = []
+    for raw in hz:
+        x = float(raw)
+        if not np.isfinite(x) or x <= 1.0:
+            folded.append(x)
+            continue
+        while x > target * (2.0 ** 0.5) and x / 2.0 >= 80.0:
+            x /= 2.0
+        while x < target / (2.0 ** 0.5) and x * 2.0 <= 1000.0:
+            x *= 2.0
+        folded.append(x)
+    return np.asarray(folded, dtype=np.float64)
 
-    One accepted window can still count: there is no second note to disagree with.
+
+def pitch_holds(hz_values: list[float], peaks: list[float]) -> bool:
+    """True when at least two clear F0s agree after octave folding.
+
+    A melody may move. A single window, a weak peak, or leftover chaos stays off Glow.
     """
-    if not hz_values or not peaks or len(hz_values) != len(peaks):
+    if not hz_values or not peaks or len(hz_values) != len(peaks) or len(hz_values) < 2:
         return False
     peak = float(np.median(np.asarray(peaks, dtype=np.float64)))
     if not np.isfinite(peak) or peak < PITCH_PEAK_CLEAR:
         return False
-    if len(hz_values) < 2:
-        return True
-    hz = np.asarray(hz_values, dtype=np.float64)
-    med = float(np.median(hz))
+    folded = _fold_octaves(hz_values)
+    med = float(np.median(folded))
     if not np.isfinite(med) or med <= 1.0:
         return False
-    rel = float(np.std(hz) / med)
-    lo = float(np.min(hz))
-    span = float(np.max(hz) / max(lo, 1.0))
+    rel = float(np.std(folded) / med)
+    lo = float(np.min(folded))
+    if lo <= 1.0:
+        return False
+    span = float(np.max(folded) / lo)
     if rel > PITCH_WANDER_REL or span > PITCH_WANDER_SPAN:
         return False
     return True
+
+
+def held_pitch_hz(hz_values: list[float], peaks: list[float]) -> float | None:
+    """Median F0 once octaves are folded. None when pitch must not steer Glow."""
+    if not pitch_holds(hz_values, peaks):
+        return None
+    return float(np.median(_fold_octaves(hz_values)))
 
 
 def is_dialogue_frame(
@@ -378,6 +414,34 @@ def is_dialogue_frame(
     if mid >= 0.36 and mid >= bass * 0.85 and period < 0.28 and 0.06 <= z <= 0.42:
         return True
     return False
+
+
+def is_clear_speech_frame(
+    *,
+    periodicity: float,
+    zcr: float,
+    bands: dict[str, float],
+    flatness: float | None = None,
+    harmonicity: float | None = None,
+) -> bool:
+    """True only for a window that is spoken beyond the musical false-drops.
+
+    The dialogue gate may drop a borderline musical frame. That frame does not
+    count toward the spoken share that dims the score.
+    """
+    if not is_dialogue_frame(
+        periodicity=periodicity,
+        zcr=zcr,
+        bands=bands,
+        flatness=flatness,
+        harmonicity=harmonicity,
+    ):
+        return False
+    if float(periodicity) >= CLEAR_SPEECH_PERIOD_MAX:
+        return False
+    if harmonicity is not None and float(harmonicity) >= CLEAR_SPEECH_HARM_MAX:
+        return False
+    return True
 
 
 def tonal_onset_score(profile: object) -> float:
@@ -567,13 +631,84 @@ def beat_hit_alignment(
     if not np.isfinite(bpm) or bpm <= 1.0:
         return None
     period = 60.0 / float(bpm)
-    tol = max(float(hop_s), 0.18 * period)
+    tol = max(float(hop_s), 0.18 * period, ALIGN_LAG_FLOOR)
     beats = np.asarray(beat_times, dtype=np.float64)
     hits = 0
     for t in onset_times:
         if float(np.min(np.abs(beats - float(t)))) <= tol:
             hits += 1
     return float(hits / len(onset_times))
+
+
+def phase_hit_alignment(
+    onset_times: list[float],
+    bpm: float,
+    *,
+    hop_s: float,
+) -> float | None:
+    """Best share of hits on a metronome at ``bpm``, trying phases across one period."""
+    if len(onset_times) < 4 or not np.isfinite(bpm) or bpm <= 1.0:
+        return None
+    period = 60.0 / float(bpm)
+    tol = max(float(hop_s), 0.18 * period, ALIGN_LAG_FLOOR)
+    onsets = np.asarray(onset_times, dtype=np.float64)
+    best = 0.0
+    for phase in np.linspace(0.0, period, 32, endpoint=False):
+        wrapped = np.mod(onsets - float(phase), period)
+        dist = np.minimum(wrapped, period - wrapped)
+        best = max(best, float(np.mean(dist <= tol)))
+    return best
+
+
+def onset_strength_ratio(strengths: list[float]) -> float | None:
+    """Median hit strength over the strong hits. None when there are too few hits.
+
+    Equal hits, loud or quiet, score near 1. A pile of weak hits under a few strong
+    ones scores low.
+    """
+    if len(strengths) < 4:
+        return None
+    arr = np.asarray(strengths, dtype=np.float64)
+    arr = arr[np.isfinite(arr)]
+    if arr.size < 4:
+        return None
+    med = float(np.median(arr))
+    peak = float(np.percentile(arr, 90))
+    if peak <= 1e-9:
+        return 1.0
+    return float(np.clip(med / peak, 0.0, 1.0))
+
+
+def resolve_pulse_bpm(
+    onset_times: list[float],
+    beat_times: list[float],
+    bpm: float,
+    *,
+    hop_s: float,
+) -> tuple[float | None, float | None]:
+    """Pick the reported tempo or its double when that grid is the one the hits land on.
+
+    Returns ``(bpm_or_none, alignment)``. None bpm means the hits missed every grid
+    we could check. A None alignment means there was nothing to check.
+    """
+    reported = beat_hit_alignment(onset_times, beat_times, bpm, hop_s=hop_s)
+    phase = phase_hit_alignment(onset_times, bpm, hop_s=hop_s)
+    doubled = phase_hit_alignment(onset_times, bpm * 2.0, hop_s=hop_s) if bpm * 2.0 <= 220.0 else None
+    if (
+        doubled is not None
+        and phase is not None
+        and doubled >= BEAT_ALIGN_MIN
+        and doubled >= phase + DOUBLE_TEMPO_MARGIN
+    ):
+        return float(bpm * 2.0), doubled
+    if phase is not None and phase >= BEAT_ALIGN_MIN:
+        return float(bpm), phase
+    if reported is not None and reported >= BEAT_ALIGN_MIN:
+        return float(bpm), reported
+    judged = [v for v in (doubled, phase, reported) if v is not None]
+    if not judged:
+        return float(bpm), None
+    return None, max(judged)
 
 
 def onset_stats(pcm: np.ndarray, samplerate: int = SAMPLERATE) -> tuple[float | None, dict[str, float]]:
@@ -644,20 +779,12 @@ def onset_stats(pcm: np.ndarray, samplerate: int = SAMPLERATE) -> tuple[float | 
     if not np.isfinite(tempo_conf):
         tempo_conf = float("nan")
 
-    alignment = beat_hit_alignment(
-        onset_marks,
-        beat_times,
-        bpm,
-        hop_s=hop_s / float(samplerate),
-    )
-    # Too few hits to call them faint. NaN means "not judged".
-    if len(strengths) >= 4:
-        onset_strength = float(np.median(np.asarray(strengths, dtype=np.float64)))
-    else:
-        onset_strength = float("nan")
+    strength_ratio = onset_strength_ratio(strengths)
+    onset_strength = float(strength_ratio) if strength_ratio is not None else float("nan")
 
     bpm_out: float | None
     pulse_rejected = 0.0
+    alignment: float | None = None
     # Require real onset evidence — aubio often invents ~60–90 BPM on silence.
     candidate = not (
         len(onset_times) < 3
@@ -669,14 +796,20 @@ def onset_stats(pcm: np.ndarray, samplerate: int = SAMPLERATE) -> tuple[float | 
     if not candidate:
         bpm_out = None
     else:
-        # Confidence is the veto. The beat grid still refuses a sure-but-wrong tempo.
+        # Confidence is the veto. The beat grid still refuses a sure-but-wrong tempo,
+        # and may keep the double-time grid when aubio locked to half speed.
+        chosen, alignment = resolve_pulse_bpm(
+            onset_marks,
+            beat_times,
+            bpm,
+            hop_s=hop_s / float(samplerate),
+        )
         unsure = np.isfinite(tempo_conf) and tempo_conf < TEMPO_CONF_MIN
-        off_grid = alignment is not None and alignment < BEAT_ALIGN_MIN
-        if unsure or off_grid:
+        if unsure or chosen is None:
             bpm_out = None
             pulse_rejected = 1.0
         else:
-            bpm_out = bpm
+            bpm_out = chosen
 
     return bpm_out, {
         "kinetic": kinetic,
@@ -780,11 +913,19 @@ def build_profile(pcm: np.ndarray, samplerate: int = SAMPLERATE) -> AcousticProf
     subs: list[float] = []
     frame_starts: list[int] = []
     keep_mask: list[bool] = []
+    clear_speech_mask: list[bool] = []
     for start in local_analysis_windows(pcm_n.size, n):
         bright, bass, flat, bands, centroid, slope, zcr_w, sub, harm, period = spectral_slice_ex(
             pcm_n, start, n, samplerate
         )
         dialogue = is_dialogue_frame(
+            periodicity=period,
+            zcr=zcr_w,
+            bands=bands,
+            flatness=flat,
+            harmonicity=harm,
+        )
+        clear_speech = is_clear_speech_frame(
             periodicity=period,
             zcr=zcr_w,
             bands=bands,
@@ -801,10 +942,12 @@ def build_profile(pcm: np.ndarray, samplerate: int = SAMPLERATE) -> AcousticProf
         subs.append(sub)
         frame_starts.append(start)
         keep_mask.append(not dialogue)
+        clear_speech_mask.append(clear_speech)
 
     n_win = len(keep_mask)
+    heard_windows = n_win
     speech_share = (
-        float(sum(1 for kept in keep_mask if not kept) / n_win) if n_win else 0.0
+        float(sum(1 for spoken in clear_speech_mask if spoken) / n_win) if n_win else 0.0
     )
 
     # Drop dialogue frames when at least one musical frame survives; else keep all.
@@ -872,9 +1015,10 @@ def build_profile(pcm: np.ndarray, samplerate: int = SAMPLERATE) -> AcousticProf
             if hz is not None:
                 pitch_vals.append(hz)
                 pitch_peaks.append(peak)
-        # A wandering or weak note does not get to steer Glow. Brightness stays.
-        if pitch_vals and pitch_holds(pitch_vals, pitch_peaks):
-            pitch_v = normalize_pitch_glow(float(np.median(pitch_vals)))
+        # A weak or single-window pitch does not steer Glow. A melody still may.
+        held = held_pitch_hz(pitch_vals, pitch_peaks)
+        if held is not None:
+            pitch_v = normalize_pitch_glow(held)
             pitch_v = 0.50 + (pitch_v - 0.50) * audibility
             bright_term = pitch_v
         else:
@@ -1002,6 +1146,7 @@ def build_profile(pcm: np.ndarray, samplerate: int = SAMPLERATE) -> AcousticProf
         sub_bass=float(np.clip(sub_bass, 0.0, 1.0)),
         zcr=float(zcr),
         speech_share=float(np.clip(speech_share, 0.0, 1.0)),
+        heard_windows=int(heard_windows),
         onset_strength=_optional_stat(ostats, "onset_strength"),
         tempo_confidence=_optional_stat(ostats, "tempo_confidence"),
         beat_alignment=_optional_stat(ostats, "beat_alignment"),

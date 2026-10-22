@@ -1364,11 +1364,23 @@ def _optional_profile_float(profile: object, attr: str) -> float | None:
     return val
 
 
+def _speech_weight(profile: object) -> int:
+    """Windows heard, before speech frames were dropped. Falls back to windows kept."""
+    heard = int(getattr(profile, "heard_windows", 0) or 0)
+    if heard > 0:
+        return heard
+    return max(int(getattr(profile, "window_count", 0) or 0), 0)
+
+
 def _blend_speech_share(profiles: list) -> float:
-    """Window-weighted share of spoken frames. A spoken intro must not dim the body."""
+    """Share of clearly spoken windows, weighted by windows heard.
+
+    A section that kept one musical frame after dropping speech still counts
+    every window it heard. A spoken intro must not dim a musical body.
+    """
     if not profiles:
         return 0.0
-    counts = [max(int(getattr(p, "window_count", 0) or 0), 0) for p in profiles]
+    counts = [_speech_weight(p) for p in profiles]
     if sum(counts) <= 0:
         counts = [1] * len(profiles)
     total = float(sum(counts))
@@ -1376,6 +1388,22 @@ def _blend_speech_share(profiles: list) -> float:
     for profile, count in zip(profiles, counts):
         acc += float(getattr(profile, "speech_share", 0.0) or 0.0) * count
     return float(acc / total)
+
+
+def _blend_onset_strength(profiles: list) -> float | None:
+    """Window-weighted hit-strength ratio. Skip sections that were not judged."""
+    vals: list[float] = []
+    weights: list[int] = []
+    for profile in profiles:
+        strength = _optional_profile_float(profile, "onset_strength")
+        if strength is None:
+            continue
+        vals.append(strength)
+        weights.append(max(_speech_weight(profile), 1))
+    if not vals:
+        return None
+    total = float(sum(weights))
+    return float(sum(v * w for v, w in zip(vals, weights)) / total)
 
 
 def _merged_pulse_rejected(profiles: list, bpm: float | None) -> bool:
@@ -1650,7 +1678,8 @@ def _merge_two_pcm_profiles(primary, secondary):
         sub_bass=float(_avg_attr(slope_profiles, "sub_bass", 0.0, slope_weights)),
         zcr=float(_avg_attr(slope_profiles, "zcr", 0.0, slope_weights)),
         speech_share=_blend_speech_share([primary, secondary]),
-        onset_strength=_optional_profile_float(ostats_src, "onset_strength"),
+        heard_windows=int(_speech_weight(primary) + _speech_weight(secondary)),
+        onset_strength=_blend_onset_strength([primary, secondary]),
         tempo_confidence=_optional_profile_float(ostats_src, "tempo_confidence"),
         beat_alignment=_optional_profile_float(ostats_src, "beat_alignment"),
         pulse_rejected=_merged_pulse_rejected([primary, secondary], bpm),
@@ -1719,7 +1748,8 @@ def _weighted_profile_blend(items: list[tuple[object, float]]):
         sub_bass=float(_avg_attr(profiles, "sub_bass", 0.0, weights)),
         zcr=float(_avg_attr(profiles, "zcr", 0.0, weights)),
         speech_share=_blend_speech_share(profiles),
-        onset_strength=_optional_profile_float(anchor, "onset_strength"),
+        heard_windows=int(sum(_speech_weight(p) for p in profiles)),
+        onset_strength=_blend_onset_strength(profiles),
         tempo_confidence=_optional_profile_float(anchor, "tempo_confidence"),
         beat_alignment=_optional_profile_float(anchor, "beat_alignment"),
         pulse_rejected=_merged_pulse_rejected(profiles, bpm),
@@ -2563,24 +2593,24 @@ def analyze_audio(
     # prior tag-BPM nudge.
     pulse_rejected = bool(profile is not None and getattr(profile, "pulse_rejected", False))
     if pcm_ok:
-        if not pulse_rejected:
-            pulse_clear = bool(
-                onset_for_bpm >= PULSE_CLARITY_BPM_MIN
-                and not bool(pcm_unstable)
-                and variation_for_bpm < 0.28
+        # A refused listen drops the detected BPM above. A tag pace may still step.
+        pulse_clear = bool(
+            onset_for_bpm >= PULSE_CLARITY_BPM_MIN
+            and not bool(pcm_unstable)
+            and variation_for_bpm < 0.28
+        )
+        if pulse_clear:
+            nudge_bpm = _energy_bpm_for_nudge(
+                tag_bpm,
+                detected_bpm,
+                onset_consistency=onset_for_bpm,
+                unstable=bool(pcm_unstable),
             )
-            if pulse_clear:
-                nudge_bpm = _energy_bpm_for_nudge(
-                    tag_bpm,
-                    detected_bpm,
-                    onset_consistency=onset_for_bpm,
-                    unstable=bool(pcm_unstable),
-                )
-                energy = _bpm_nudge(
-                    energy,
-                    nudge_bpm,
-                    soft=soft_pcm_only or (tag_bpm is None and detected_bpm is not None),
-                )
+            energy = _bpm_nudge(
+                energy,
+                nudge_bpm,
+                soft=soft_pcm_only or (tag_bpm is None and detected_bpm is not None),
+            )
     else:
         energy = _bpm_nudge(energy, tag_bpm, soft=soft_pcm_only)
     if soft_pcm_only and pcm_ok:
@@ -2632,16 +2662,15 @@ def analyze_audio(
 
     bpm_conflict = False
     bpm_ok = False
-    # A refused pulse does not confirm the tag and does not fight it.
-    if not pulse_rejected:
-        if tag_bpm is not None and detected_bpm is not None:
-            if abs(float(tag_bpm) - float(detected_bpm)) > 18.0:
-                bpm_conflict = True
-            else:
-                bpm_ok = True
-        elif tag_bpm is not None or detected_bpm is not None:
-            # Only credit BPM when we have a coerced (finite, positive) value.
+    # A refused listen does not fight the tag, and the tag pace still counts.
+    if tag_bpm is not None and detected_bpm is not None and not pulse_rejected:
+        if abs(float(tag_bpm) - float(detected_bpm)) > 18.0:
+            bpm_conflict = True
+        else:
             bpm_ok = True
+    elif tag_bpm is not None or (detected_bpm is not None and not pulse_rejected):
+        # Only credit BPM when we have a coerced (finite, positive) value.
+        bpm_ok = True
 
     if not np.isfinite(valence):
         valence = float(seed_v)

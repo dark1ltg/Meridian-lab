@@ -446,14 +446,17 @@ def test_tonal_onset_score_monotonic() -> None:
     assert tonal_onset_score(strong) > tonal_onset_score(weak) + 0.2
 
 
-def test_pitch_holds_only_for_a_clear_steady_note() -> None:
-    from meridian.acoustic import pitch_holds
+def test_pitch_holds_a_melody_and_refuses_one_weak_window() -> None:
+    from meridian.acoustic import held_pitch_hz, pitch_holds
 
     assert pitch_holds([220.0, 222.0, 218.0], [0.72, 0.70, 0.74])
-    assert pitch_holds([440.0], [0.66])
-    assert not pitch_holds([120.0, 660.0], [0.80, 0.80])
+    assert pitch_holds([196.0, 247.0, 330.0, 294.0, 220.0], [0.70] * 5)
+    assert pitch_holds([220.0, 440.0], [0.80, 0.80])
+    assert not pitch_holds([440.0], [0.66])
     assert not pitch_holds([220.0, 224.0], [0.40, 0.42])
     assert not pitch_holds([], [])
+    folded = held_pitch_hz([220.0, 440.0], [0.80, 0.80])
+    assert folded is not None and abs(folded - 440.0) < 1.0
 
 
 def test_beat_grid_refuses_a_shifted_pulse() -> None:
@@ -504,7 +507,7 @@ def test_spoken_and_faint_hits_dim_the_score_only() -> None:
         bpm_ok=True,
         variation=0.05,
         onset_consistency=0.85,
-        onset_strength=12.0,
+        onset_strength=0.05,
     )
     strong_hits, note_strong = confidence_from_evidence(
         tag_key="metal",
@@ -512,7 +515,7 @@ def test_spoken_and_faint_hits_dim_the_score_only() -> None:
         bpm_ok=True,
         variation=0.05,
         onset_consistency=0.85,
-        onset_strength=4000.0,
+        onset_strength=0.80,
     )
     assert spoken < base - 0.08
     assert "spoken" in note_spoken
@@ -565,6 +568,23 @@ def test_refused_pulse_skips_the_kinetic_step_and_the_bpm_bonus() -> None:
     assert "pulse miss" in (dropped.confidence_note or "")
     assert abs(dropped.energy - 0.40) < abs(kept.energy - 0.40)
 
+    tagged = _prof(
+        valence=0.42,
+        energy=0.40,
+        bpm=160.0,
+        onset_consistency=0.86,
+        variation=0.05,
+        unstable=False,
+        pulse_rejected=True,
+    )
+    with patch("meridian.features._decode_pcm_with_fallback", return_value=(pcm, False, None, None)):
+        with patch("meridian.features._pcm_mood_cues", return_value=_cues(tagged)):
+            kept_tag = analyze_audio("/tmp/pulse-tag.flac", "", "t", "a", 128.0)
+    assert kept_tag.bpm == 128.0
+    assert "BPM" in (kept_tag.confidence_note or "")
+    assert "pulse miss" in (kept_tag.confidence_note or "")
+    assert abs(kept_tag.energy - 0.40) > abs(dropped.energy - 0.40)
+
 
 def test_section_merge_keeps_speech_share_and_a_refused_pulse() -> None:
     from meridian.features import _merge_two_pcm_profiles
@@ -597,6 +617,29 @@ def test_section_merge_keeps_speech_share_and_a_refused_pulse() -> None:
     both = _merge_two_pcm_profiles(refused_a, refused_b)
     assert both.bpm is None
     assert both.pulse_rejected is True
+
+    spoken_heavy = _prof(
+        speech_share=0.8,
+        heard_windows=5,
+        window_count=1,
+        bpm=None,
+        pulse_rejected=False,
+    )
+    musical = _prof(
+        valence=0.52,
+        energy=0.52,
+        speech_share=0.0,
+        heard_windows=5,
+        window_count=5,
+        bpm=100.0,
+        onset_consistency=0.4,
+        onset_strength=0.9,
+    )
+    spoken_heavy.onset_strength = 0.05
+    weighted = _merge_two_pcm_profiles(spoken_heavy, musical)
+    assert abs(weighted.speech_share - 0.4) < 1e-6
+    assert weighted.onset_strength is not None
+    assert abs(weighted.onset_strength - 0.475) < 1e-6
 
 
 def test_spectral_bands_partition_only() -> None:
