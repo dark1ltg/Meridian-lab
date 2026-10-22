@@ -700,6 +700,7 @@ class MainWindow(QMainWindow):
         if not track:
             return
         _, _, radius = self.map.lens_mood()
+        self.map.begin_search_corridor(track.valence, track.energy)
         self.map.set_lens(track.valence, track.energy, radius)
         self.settings.setValue("lens_x", track.valence)
         self.settings.setValue("lens_y", track.energy)
@@ -1635,10 +1636,21 @@ class MainWindow(QMainWindow):
         """Local-only: gently move unpinned stars from skip/finish under the lens."""
         if self._closing:
             return
+        before = self.library.get(track_id)
         lx, ly, _ = self.map.lens_mood()
         moved = self.library.nudge_mood_from_listen(
             track_id, lens_x=lx, lens_y=ly, skipped=skipped
         )
+        if moved and before is not None and not before.pinned:
+            after = self.library.get(track_id)
+            if after is not None:
+                self.map.begin_listen_ease(
+                    track_id,
+                    before.valence,
+                    before.energy,
+                    after.valence,
+                    after.energy,
+                )
         if moved:
             self.refresh_plan(keep_current=True, rebuild_queue=False)
 

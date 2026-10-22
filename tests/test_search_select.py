@@ -127,8 +127,15 @@ def test_search_picked_pulls_into_queue(qapp, library: Library) -> None:
     pulls: list[int] = []
 
     class _FakeMap:
+        def __init__(self):
+            self.corridor: tuple[float, float] | None = None
+
         def lens_mood(self):
             return 0.5, 0.5, 0.2
+
+        def begin_search_corridor(self, valence: float, energy: float) -> bool:
+            self.corridor = (valence, energy)
+            return True
 
         def set_lens(self, *_args):
             return None
@@ -153,6 +160,7 @@ def test_search_picked_pulls_into_queue(qapp, library: Library) -> None:
     mw_mod.MainWindow._search_picked(stub, 2)
     assert pulls == [2]
     assert "Lens on" in stub._status
+    assert stub.map.corridor == (0.5, 0.5)
 
 
 def test_picking_a_hit_tells_the_sky_the_search_is_over(qapp, library: Library) -> None:

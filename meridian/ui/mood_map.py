@@ -159,6 +159,19 @@ def sky_haze(band: str) -> float:
     return {"night": 0.0, "dusk": 0.38, "dawn": 0.5, "day": 1.0}.get((band or "night").lower(), 0.0)
 
 
+# One second of slide after a finish or skip. A search trip fades sooner.
+LISTEN_EASE_S = 1.0
+SEARCH_CORRIDOR_S = 0.65
+
+
+def ease_amount(elapsed: float, duration: float) -> float:
+    """Smooth 0..1. The star eases, then settles. It does not jump."""
+    if duration <= 0.0:
+        return 1.0
+    t = max(0.0, min(1.0, float(elapsed) / float(duration)))
+    return t * t * (3.0 - 2.0 * t)
+
+
 def heartbeat_amount(phase: float) -> float:
     """Lub-dub strength, 0 to 1. ``phase`` runs 0..1 across one beat."""
     phase = phase % 1.0
@@ -1113,6 +1126,9 @@ class MoodMap(QGraphicsView):
         self._ripple_neighbors: list[tuple[QPointF, float]] = []
         self._ripple_start = 0.0
         self._ripple_until = 0.0
+        # track id, start scene point, end scene point, began, until
+        self._listen_ease: tuple[int, QPointF, QPointF, float, float] | None = None
+        self._search_corridor: tuple[QPointF, QPointF, float, float] | None = None
         self._falling = False
         self._fall_from = VIEW_ZOOM_MIN
         self._fall_t = 0.0
@@ -1399,6 +1415,7 @@ class MoodMap(QGraphicsView):
                 self._sky_candidate_id = None
                 self._sky_press_scene = None
                 self._sky_defer_pan = False
+        self._hold_listen_ease()
         self._rebuild_star_grid()
         self._refresh_crowd()
         sig = self._field_signature()
@@ -1553,15 +1570,32 @@ class MoodMap(QGraphicsView):
         origin = self._ripple_origin
         return QRectF(origin.x() - reach, origin.y() - reach, reach * 2.0, reach * 2.0)
 
+    def _span_rect(self, a: QPointF, b: QPointF, pad: float) -> QRectF:
+        left = min(a.x(), b.x()) - pad
+        top = min(a.y(), b.y()) - pad
+        return QRectF(left, top, abs(b.x() - a.x()) + pad * 2.0, abs(b.y() - a.y()) + pad * 2.0)
+
+    def _ease_rect(self) -> QRectF | None:
+        if self._listen_ease is None:
+            return None
+        _tid, start, end, _t0, _until = self._listen_ease
+        return self._span_rect(start, end, 18.0)
+
+    def _corridor_rect(self) -> QRectF | None:
+        if self._search_corridor is None:
+            return None
+        start, end, _t0, _until = self._search_corridor
+        return self._span_rect(start, end, 12.0)
+
     def _invalidate_life(self) -> None:
-        """Redraw only the pulse and the ripple, not the whole sky."""
+        """Redraw only the pulse, ripple, ease, and search trip, not the whole sky."""
         pulse = self._pulse_rect()
         ripple = self._ripple_rect()
         current: QRectF | None = None
-        if pulse is not None:
-            current = pulse
-        if ripple is not None:
-            current = ripple if current is None else current.united(ripple)
+        for piece in (pulse, ripple, self._ease_rect(), self._corridor_rect()):
+            if piece is None:
+                continue
+            current = piece if current is None else current.united(piece)
         previous = self._life_prev
         self._life_prev = current
         if current is None and previous is None:
@@ -1586,10 +1620,16 @@ class MoodMap(QGraphicsView):
         self._ripple_start = monotonic()
         self._ripple_until = self._ripple_start + 0.62
 
-    def _arm_life(self) -> None:
+    def _life_busy(self) -> bool:
+        now = monotonic()
         pulsing = self._playing and self._current_id is not None
-        rippling = monotonic() < self._ripple_until
-        if pulsing or rippling:
+        rippling = now < self._ripple_until
+        easing = self._listen_ease is not None
+        corridor = self._search_corridor is not None and now < self._search_corridor[3]
+        return pulsing or rippling or easing or corridor
+
+    def _arm_life(self) -> None:
+        if self._life_busy():
             if not self._life_timer.isActive():
                 self._life_timer.start()
         else:
@@ -1597,15 +1637,18 @@ class MoodMap(QGraphicsView):
         self._invalidate_life()
 
     def _tick_life(self) -> None:
-        pulsing = self._playing and self._current_id is not None
-        rippling = monotonic() < self._ripple_until
-        if not pulsing and not rippling:
+        self._advance_listen_ease()
+        if self._search_corridor is not None and monotonic() >= self._search_corridor[3]:
+            self._search_corridor = None
+        if not self._life_busy():
             self._life_timer.stop()
         self._invalidate_life()
 
     def paint_sky_life(self, painter: QPainter) -> None:
-        """Pulse and ripple. Search flares are a still picture, not this animation."""
+        """Pulse, ripple, a nudged star, and the search trip. Flares stay a still picture."""
         now = monotonic()
+        self._paint_listen_ease(painter, now)
+        self._paint_search_corridor(painter, now)
         painter.setPen(Qt.PenStyle.NoPen)
         if self._ripple_origin is not None and now < self._ripple_until:
             span = max(0.001, self._ripple_until - self._ripple_start)
@@ -1640,12 +1683,148 @@ class MoodMap(QGraphicsView):
                     radius * (2.3 + 2.4 * beat),
                 )
 
+    def _blocks_listen_ease(self) -> bool:
+        """A drag already owns the sky. Let the star land without a slide."""
+        return bool(self._drag_locked_ids()) or self._panning or self._sky_dragged or self._hand_drag_armed
+
+    def begin_listen_ease(
+        self,
+        track_id: int,
+        old_valence: float,
+        old_energy: float,
+        new_valence: float,
+        new_energy: float,
+    ) -> bool:
+        """Slide one unpinned star from the spot it just left. Pins never call this."""
+        if self._blocks_listen_ease():
+            return False
+        start = self.mood_to_pos(old_valence, old_energy)
+        end = self.mood_to_pos(new_valence, new_energy)
+        if hypot(end.x() - start.x(), end.y() - start.y()) < 0.8:
+            return False
+        now = monotonic()
+        self._listen_ease = (int(track_id), start, end, now, now + LISTEN_EASE_S)
+        self._arm_life()
+        return True
+
+    def _hold_listen_ease(self) -> None:
+        """Keep a nudged star on its slide when the sky refreshes."""
+        ease = self._listen_ease
+        if ease is None:
+            return
+        tid, start, end, t0, until = ease
+        if tid not in self._positions or tid in self._drag_locked_ids():
+            self._listen_ease = None
+            return
+        now = monotonic()
+        if now >= until:
+            self._positions[tid] = QPointF(end)
+            self._listen_ease = None
+            return
+        t = ease_amount(now - t0, until - t0)
+        self._positions[tid] = QPointF(
+            start.x() + (end.x() - start.x()) * t,
+            start.y() + (end.y() - start.y()) * t,
+        )
+
+    def _advance_listen_ease(self) -> None:
+        ease = self._listen_ease
+        if ease is None:
+            return
+        tid, start, end, t0, until = ease
+        if tid not in self._positions:
+            self._listen_ease = None
+            return
+        if tid in self._drag_locked_ids():
+            self._listen_ease = None
+            return
+        now = monotonic()
+        if now >= until:
+            self._positions[tid] = QPointF(end)
+            self._listen_ease = None
+            star = self._stars.get(tid)
+            if star is not None:
+                star.setPos(end)
+            if tid in self._ranked:
+                self._rebuild_starfield()
+                self._refresh_route()
+                self._refresh_lens_colors()
+            return
+        t = ease_amount(now - t0, until - t0)
+        pos = QPointF(
+            start.x() + (end.x() - start.x()) * t,
+            start.y() + (end.y() - start.y()) * t,
+        )
+        self._positions[tid] = pos
+        star = self._stars.get(tid)
+        if star is not None:
+            star.setPos(pos)
+
+    def _paint_listen_ease(self, painter: QPainter, now: float) -> None:
+        ease = self._listen_ease
+        if ease is None:
+            return
+        tid, start, end, t0, until = ease
+        t = ease_amount(now - t0, until - t0)
+        pos = QPointF(
+            start.x() + (end.x() - start.x()) * t,
+            start.y() + (end.y() - start.y()) * t,
+        )
+        ghost = QColor(LOW_TRUST_QCOLOR)
+        ghost.setAlpha(int(36 + 150 * (1.0 - t)))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(ghost))
+        painter.drawEllipse(start, 2.2, 2.2)
+        star = self._stars.get(tid)
+        if star is not None and star.isVisible():
+            return
+        item = self._ranked.get(tid)
+        if item is None:
+            return
+        radius, color, _bloom = self._night_star(item, False)
+        painter.setBrush(QBrush(color))
+        painter.drawEllipse(pos, radius, radius)
+
+    def begin_search_corridor(self, valence: float, energy: float) -> bool:
+        """A short trip from the lens to the song search just chose. Not the queue path."""
+        start = QPointF(self.lens.pos())
+        end = self.mood_to_pos(valence, energy)
+        if hypot(end.x() - start.x(), end.y() - start.y()) < 6.0:
+            self._search_corridor = None
+            return False
+        now = monotonic()
+        self._search_corridor = (start, end, now, now + SEARCH_CORRIDOR_S)
+        self._arm_life()
+        return True
+
+    def _paint_search_corridor(self, painter: QPainter, now: float) -> None:
+        trip = self._search_corridor
+        if trip is None:
+            return
+        start, end, t0, until = trip
+        if now >= until:
+            return
+        t = ease_amount(now - t0, until - t0)
+        ink = QColor(168, 206, 214, int(210 * (1.0 - t)))
+        pen = QPen(ink, 1.35)
+        pen.setCosmetic(True)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setDashPattern([2.0, 5.0])
+        painter.setPen(pen)
+        painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+        painter.drawLine(start, end)
+
     def _field_signature(self) -> object:
         """Cheap fingerprint so play/nudge/lens refresh can skip a full rebake."""
         parts: list[tuple] = []
+        easing_id = self._listen_ease[0] if self._listen_ease is not None else None
         for tid in sorted(self._ranked):
             r = self._ranked[tid]
-            p = self._positions[tid]
+            # The slide moves every frame. The bake stays put until the star settles.
+            if self._listen_ease is not None and tid == easing_id:
+                p = self._listen_ease[1]
+            else:
+                p = self._positions[tid]
             conf = read_mood_confidence(r.track)
             parts.append(
                 (
@@ -1657,9 +1836,10 @@ class MoodMap(QGraphicsView):
                     round(conf, 2),
                     int(getattr(r.track, "duration_ms", 0) or 0),
                     str(getattr(r.track, "timbre_flag", "") or ""),
+                    tid == easing_id,
                 )
             )
-        return (self._current_id, self._sky_band, tuple(parts))
+        return (self._current_id, self._sky_band, easing_id, tuple(parts))
 
     def _drag_locked_ids(self) -> set[int]:
         """Track ids currently being pressed/dragged — positions must not reset."""
@@ -1726,7 +1906,10 @@ class MoodMap(QGraphicsView):
                     radius,
                 )
         painter.setPen(Qt.PenStyle.NoPen)
+        easing_id = self._listen_ease[0] if self._listen_ease is not None else None
         for item in order:
+            if item.track.id == easing_id:
+                continue
             pos = self._positions[item.track.id]
             radius, color, bloom = self._night_star(item, density_mode)
             haze = sky_haze(self._sky_band)

@@ -14,12 +14,13 @@ os.environ.setdefault("MERIDIAN_NO_GL", "1")
 pytest.importorskip("PySide6")
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtWidgets import QApplication, QGraphicsEllipseItem, QGraphicsLineItem
 
 from meridian.library import Track
 from meridian.queue_engine import Quadrant, RankedTrack
 from meridian.ui.mood_map import (
+    FIELD_SCALE,
     LOVED_RING_QCOLOR,
     SKY_LINK_MAX,
     STAR_BODY_FLOOR,
@@ -33,6 +34,7 @@ from meridian.ui.mood_map import (
     constellation_segments,
     crowd_ids,
     duration_radius_scale,
+    ease_amount,
     heartbeat_amount,
     night_body_radius,
     queue_star_color,
@@ -657,3 +659,108 @@ def test_zooming_home_from_close_in_falls_back(qapp) -> None:
     view.reset_view()
     assert not view._falling
     assert view._user_zoom == 1.0
+
+
+def test_ease_amount_starts_still_and_finishes_settled() -> None:
+    assert ease_amount(0.0, 1.0) == 0.0
+    assert ease_amount(1.0, 1.0) == 1.0
+    assert ease_amount(2.0, 1.0) == 1.0
+    mid = ease_amount(0.5, 1.0)
+    assert 0.4 < mid < 0.6
+
+
+def _alpha_near(image: QImage, x: float, y: float, radius: int = 3) -> int:
+    best = 0
+    for dy in range(-radius, radius + 1):
+        for dx in range(-radius, radius + 1):
+            px = int(round(x)) + dx
+            py = int(round(y)) + dy
+            if 0 <= px < image.width() and 0 <= py < image.height():
+                best = max(best, image.pixelColor(px, py).alpha())
+    return best
+
+
+def test_listen_nudge_eases_one_star_and_leaves_a_pewter_ghost(qapp) -> None:
+    view = MoodMap()
+    view.resize(800, 600)
+    old = _ranked(_track(1, valence=0.2, energy=0.2, mood_confidence=0.9))
+    view.set_tracks([old], None)
+    assert view.begin_listen_ease(1, 0.2, 0.2, 0.8, 0.8)
+    moved = _ranked(_track(1, valence=0.8, energy=0.8, mood_confidence=0.9))
+    view.set_tracks([moved], None)
+    start = view.mood_to_pos(0.2, 0.2)
+    end = view.mood_to_pos(0.8, 0.8)
+    placed = view._positions[1]
+    assert abs(placed.x() - start.x()) < 1.0
+    assert abs(placed.y() - start.y()) < 1.0
+    baked = view._field.pixmap().toImage()
+    assert _alpha_near(baked, end.x() * FIELD_SCALE, end.y() * FIELD_SCALE, 4) == 0
+    life = QImage(800, 600, QImage.Format.Format_ARGB32_Premultiplied)
+    life.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(life)
+    view.paint_sky_life(painter)
+    painter.end()
+    assert _alpha_near(life, start.x(), start.y(), 3) > 20
+    # A second refresh during the slide does not rebake the whole sky.
+    rebuilds = {"n": 0}
+    real_rebuild = view._rebuild_starfield
+
+    def wrapped_rebuild() -> None:
+        rebuilds["n"] += 1
+        real_rebuild()
+
+    view._rebuild_starfield = wrapped_rebuild
+    view.set_tracks([moved], None)
+    assert rebuilds["n"] == 0
+    tid, ease_start, ease_end, t0, _until = view._listen_ease
+    view._listen_ease = (tid, ease_start, ease_end, t0, t0)
+    view._advance_listen_ease()
+    assert view._listen_ease is None
+    settled = view._positions[1]
+    assert abs(settled.x() - end.x()) < 1.0
+    assert abs(settled.y() - end.y()) < 1.0
+    baked = view._field.pixmap().toImage()
+    assert _alpha_near(baked, end.x() * FIELD_SCALE, end.y() * FIELD_SCALE, 4) > 20
+
+
+def test_listen_ease_waits_out_a_drag_and_ignores_a_tiny_step(qapp) -> None:
+    view = MoodMap()
+    view.set_tracks([_ranked(_track(1, valence=0.4, energy=0.4))], None)
+    view._panning = True
+    assert view.begin_listen_ease(1, 0.4, 0.4, 0.7, 0.7) is False
+    view._panning = False
+    assert view.begin_listen_ease(1, 0.4, 0.4, 0.4, 0.4) is False
+
+
+def test_search_corridor_is_not_the_queue_path(qapp) -> None:
+    view = MoodMap()
+    view.resize(800, 600)
+    view.set_tracks(
+        [
+            _ranked(_track(1, valence=0.15, energy=0.15)),
+            _ranked(_track(2, valence=0.85, energy=0.75)),
+        ],
+        None,
+    )
+    view.set_lens(0.15, 0.15, 0.22)
+    route = view._route.pixmap().cacheKey()
+    assert view.begin_search_corridor(0.85, 0.75)
+    assert view._route.pixmap().cacheKey() == route
+    start, end, _t0, _until = view._search_corridor
+    home = view.mood_to_pos(0.15, 0.15)
+    assert abs(start.x() - home.x()) < 1.0
+    assert abs(start.y() - home.y()) < 1.0
+    life = QImage(800, 600, QImage.Format.Format_ARGB32_Premultiplied)
+    life.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(life)
+    view.paint_sky_life(painter)
+    painter.end()
+    mid_x = (start.x() + end.x()) / 2.0
+    mid_y = (start.y() + end.y()) / 2.0
+    assert _alpha_near(life, mid_x, mid_y, 6) > 0
+    assert view._route.pixmap().cacheKey() == route
+    view._search_corridor = (start, end, _t0, _t0)
+    view._tick_life()
+    assert view._search_corridor is None
+    view.set_lens(0.5, 0.5, 0.22)
+    assert view.begin_search_corridor(0.5, 0.5) is False
