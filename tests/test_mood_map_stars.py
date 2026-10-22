@@ -115,7 +115,23 @@ def test_body_stays_visible_and_smaller_than_a_coin() -> None:
         assert weak >= STAR_BODY_FLOOR_DENSE * 0.92
 
 
-def test_loved_star_keeps_a_warm_ring(qapp) -> None:
+def test_zero_confidence_draws_as_a_weak_star(qapp) -> None:
+    """A stored 0 is rock-bottom, not the neutral 0.5 fill-in for a missing score."""
+    zero_star = TrackStar(_ranked(_track(11, mood_confidence=0.0)))
+    mid_star = TrackStar(_ranked(_track(12, mood_confidence=0.5)))
+    zero_star.apply_style(zero_star.ranked, False)
+    mid_star.apply_style(mid_star.ranked, False)
+    assert zero_star.brush().color().rgb() == quiet_star_color(0).rgb()
+    assert mid_star.brush().color().rgb() == quiet_star_color(1).rgb()
+    assert "0.00" in zero_star.toolTip()
+
+    missing = _track(13, mood_confidence=0.5)
+    missing.mood_confidence = None
+    mood = MoodMap()
+    assert mood._confidence_band(_ranked(missing)) == 1
+    assert mood._confidence_band(_ranked(_track(14, mood_confidence=0.0))) == 0
+    _radius, color, _bloom = mood._night_star(_ranked(_track(15, mood_confidence=0.0)), False)
+    assert color.rgb() == quiet_star_color(0).rgb()
     star = TrackStar(_ranked(_track(3, loved=True, mood_confidence=0.9)))
     pen = star.pen()
     assert pen.style() != Qt.PenStyle.NoPen

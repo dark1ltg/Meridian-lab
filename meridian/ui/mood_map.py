@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 from meridian.context import LENS_RADIUS_DEFAULT, LENS_RADIUS_MAX, LENS_RADIUS_MIN
 from meridian.queue_engine import QUADRANT_TITLE, Quadrant, RankedTrack
 from meridian.ui.fonts import sans
-from meridian.features import CONFIDENCE_HIGH, CONFIDENCE_LOW, track_is_unplaced
+from meridian.features import CONFIDENCE_HIGH, CONFIDENCE_LOW, read_mood_confidence, track_is_unplaced
 from meridian.ui.palette import (
     LOW_TRUST_QCOLOR,
     MID_CONFIDENCE_OPACITY,
@@ -792,7 +792,7 @@ class TrackStar(QGraphicsEllipseItem):
 
     def apply_style(self, ranked: RankedTrack, current: bool) -> None:
         self.ranked = ranked
-        conf = float(getattr(ranked.track, "mood_confidence", 0.5) or 0.5)
+        conf = read_mood_confidence(ranked.track)
         # Pins are locked truth — always draw as high-trust body color.
         if ranked.track.pinned or current:
             band = "high"
@@ -1646,7 +1646,7 @@ class MoodMap(QGraphicsView):
         for tid in sorted(self._ranked):
             r = self._ranked[tid]
             p = self._positions[tid]
-            conf = float(getattr(r.track, "mood_confidence", 0.5) or 0.5)
+            conf = read_mood_confidence(r.track)
             parts.append(
                 (
                     tid,
@@ -1690,7 +1690,7 @@ class MoodMap(QGraphicsView):
         def _conf_band(r: RankedTrack) -> int:
             if r.track.pinned:
                 return 2
-            c = float(getattr(r.track, "mood_confidence", 0.5) or 0.5)
+            c = read_mood_confidence(r.track)
             if c >= CONFIDENCE_HIGH:
                 return 2
             if c >= CONFIDENCE_LOW:
@@ -1869,7 +1869,7 @@ class MoodMap(QGraphicsView):
         if item.track.pinned or item.track.id == self._current_id:
             band = 2
         else:
-            conf = float(getattr(item.track, "mood_confidence", 0.5) or 0.5)
+            conf = read_mood_confidence(item.track)
             if conf >= CONFIDENCE_HIGH:
                 band = 2
             elif conf >= CONFIDENCE_LOW:
@@ -2020,7 +2020,7 @@ class MoodMap(QGraphicsView):
     def _confidence_band(self, item: RankedTrack) -> int:
         if item.track.pinned or item.track.id == self._current_id:
             return 2
-        conf = float(getattr(item.track, "mood_confidence", 0.5) or 0.5)
+        conf = read_mood_confidence(item.track)
         if conf >= CONFIDENCE_HIGH:
             return 2
         if conf >= CONFIDENCE_LOW:

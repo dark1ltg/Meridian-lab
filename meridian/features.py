@@ -262,6 +262,20 @@ CONTAINER_SEED_KEYS = frozenset(
 CONFIDENCE_LOW = 0.45
 CONFIDENCE_HIGH = 0.75
 
+
+def read_mood_confidence(track: object) -> float:
+    """Neutral 0.5 only when confidence is missing. Exact 0 stays rock-bottom."""
+    raw = getattr(track, "mood_confidence", None)
+    if raw is None:
+        return 0.5
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return 0.5
+    if not np.isfinite(val):
+        return 0.5
+    return val
+
 # Test hook: increments whenever ffmpeg decode is attempted.
 _decode_pcm_calls = 0
 # Cooperative abort for AnalyzeWorker.stop / quit (kills in-flight ffmpeg).

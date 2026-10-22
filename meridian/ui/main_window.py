@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from meridian import __version__
-from meridian.features import CONFIDENCE_HIGH, CONFIDENCE_LOW, track_is_unplaced
+from meridian.features import CONFIDENCE_HIGH, CONFIDENCE_LOW, read_mood_confidence, track_is_unplaced
 from meridian.context import (
     LENS_RADIUS_DEFAULT,
     LENS_RADIUS_MAX,
@@ -662,7 +662,7 @@ class MainWindow(QMainWindow):
             reasons.append(f"clock band: {ctx.band_label}")
             reasons.append(f"mode: {self.mode.value.title()}")
             reasons.append(f"mood: valence {track.valence:.2f}, energy {track.energy:.2f}")
-            conf = float(getattr(track, "mood_confidence", 0.5) or 0.5)
+            conf = read_mood_confidence(track)
             if track.pinned:
                 reasons.append("confidence 1.00 (pinned)")
             else:
