@@ -721,6 +721,70 @@ def test_listen_nudge_eases_one_star_and_leaves_a_pewter_ghost(qapp) -> None:
     assert abs(settled.y() - end.y()) < 1.0
     baked = view._field.pixmap().toImage()
     assert _alpha_near(baked, end.x() * FIELD_SCALE, end.y() * FIELD_SCALE, 4) > 20
+    assert view._nearest_track_id(end, 14) == 1
+    assert view._nearest_track_id(start, 14) is None
+
+
+def test_press_during_the_slide_puts_the_star_back(qapp) -> None:
+    view = MoodMap()
+    view.resize(800, 600)
+    view.set_tracks([_ranked(_track(1, valence=0.2, energy=0.2))], None)
+    assert view.begin_listen_ease(1, 0.2, 0.2, 0.8, 0.8)
+    view.set_tracks([_ranked(_track(1, valence=0.8, energy=0.8))], None)
+    view._sky_hold_id = 1
+    view._advance_listen_ease()
+    assert view._listen_ease is None
+    pos = view._positions[1]
+    baked = view._field.pixmap().toImage()
+    assert _alpha_near(baked, pos.x() * FIELD_SCALE, pos.y() * FIELD_SCALE, 4) > 20
+    assert view._nearest_track_id(pos, 14) == 1
+
+
+def test_slide_aims_lines_and_tiles_at_the_new_spot(qapp) -> None:
+    view = MoodMap()
+    view.resize(800, 600)
+    view.set_tracks(
+        [
+            _ranked(_track(1, valence=0.1, energy=0.5)),
+            _ranked(_track(2, valence=0.56, energy=0.5)),
+        ],
+        None,
+    )
+    assert view.begin_listen_ease(1, 0.1, 0.5, 0.5, 0.5)
+    view.set_tracks(
+        [
+            _ranked(_track(1, valence=0.5, energy=0.5)),
+            _ranked(_track(2, valence=0.56, energy=0.5)),
+        ],
+        None,
+    )
+    end = view.mood_to_pos(0.5, 0.5)
+    start = view.mood_to_pos(0.1, 0.5)
+    aimed = False
+    for seg in view._link_cache:
+        if (abs(seg[0] - end.x()) < 1 and abs(seg[1] - end.y()) < 1) or (
+            abs(seg[2] - end.x()) < 1 and abs(seg[3] - end.y()) < 1
+        ):
+            aimed = True
+        assert not (abs(seg[0] - start.x()) < 1 and abs(seg[1] - start.y()) < 1)
+        assert not (abs(seg[2] - start.x()) < 1 and abs(seg[3] - start.y()) < 1)
+    assert aimed
+    key = view._region_position_key()
+    assert any(abs(x - end.x()) < 0.2 and abs(y - end.y()) < 0.2 for _tid, x, y in key[2])
+
+
+def test_a_near_search_clears_the_trip_line(qapp) -> None:
+    view = MoodMap()
+    view.resize(800, 600)
+    view.set_lens(0.8, 0.8, 0.22)
+    updates: list[object] = []
+    view._life.update = lambda *args, **kwargs: updates.append(args)
+    assert view.begin_search_corridor(0.2, 0.2)
+    updates.clear()
+    view.set_lens(0.2, 0.2, 0.22)
+    assert view.begin_search_corridor(0.2, 0.2) is False
+    assert view._search_corridor is None
+    assert updates
 
 
 def test_listen_ease_waits_out_a_drag_and_ignores_a_tiny_step(qapp) -> None:

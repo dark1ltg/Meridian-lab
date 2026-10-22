@@ -1734,9 +1734,14 @@ class MoodMap(QGraphicsView):
         tid, start, end, t0, until = ease
         if tid not in self._positions:
             self._listen_ease = None
+            self._rebuild_star_grid()
             return
         if tid in self._drag_locked_ids():
+            # The press owns the star. Paint it back where it is, or the sky loses it.
             self._listen_ease = None
+            self._stamp_eased_star(tid)
+            self._rebuild_star_grid()
+            self._field_sig = self._field_signature()
             return
         now = monotonic()
         if now >= until:
@@ -1745,10 +1750,10 @@ class MoodMap(QGraphicsView):
             star = self._stars.get(tid)
             if star is not None:
                 star.setPos(end)
-            if tid in self._ranked:
-                self._rebuild_starfield()
-                self._refresh_route()
-                self._refresh_lens_colors()
+            self._stamp_eased_star(tid)
+            self._rebuild_star_grid()
+            self._refresh_lens_colors()
+            self._field_sig = self._field_signature()
             return
         t = ease_amount(now - t0, until - t0)
         pos = QPointF(
@@ -1756,6 +1761,7 @@ class MoodMap(QGraphicsView):
             start.y() + (end.y() - start.y()) * t,
         )
         self._positions[tid] = pos
+        self._rebuild_star_grid()
         star = self._stars.get(tid)
         if star is not None:
             star.setPos(pos)
@@ -1781,16 +1787,28 @@ class MoodMap(QGraphicsView):
         item = self._ranked.get(tid)
         if item is None:
             return
-        radius, color, _bloom = self._night_star(item, False)
-        painter.setBrush(QBrush(color))
-        painter.drawEllipse(pos, radius, radius)
+        self._paint_baked_star(painter, item, pos, len(self._ranked) > 1200)
+        if self.star_in_lens(pos):
+            radius, _quiet, _bloom = self._night_star(item, False)
+            band = self._confidence_band(item)
+            color = queue_star_color(item.quadrant, loved=bool(item.track.loved), band=band)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(color))
+            painter.drawEllipse(pos, radius, radius)
+            if item.track.loved and not item.track.pinned and tid != self._current_id:
+                ring = QPen(LOVED_RING_QCOLOR, 1.2)
+                painter.setPen(ring)
+                painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+                painter.drawEllipse(pos, radius + 1.35, radius + 1.35)
 
     def begin_search_corridor(self, valence: float, energy: float) -> bool:
         """A short trip from the lens to the song search just chose. Not the queue path."""
         start = QPointF(self.lens.pos())
         end = self.mood_to_pos(valence, energy)
         if hypot(end.x() - start.x(), end.y() - start.y()) < 6.0:
+            # Drop a line that is already on screen, and repaint that spot.
             self._search_corridor = None
+            self._invalidate_life()
             return False
         now = monotonic()
         self._search_corridor = (start, end, now, now + SEARCH_CORRIDOR_S)
@@ -1814,6 +1832,68 @@ class MoodMap(QGraphicsView):
         painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
         painter.drawLine(start, end)
 
+    def _model_pos(self, tid: int) -> QPointF:
+        """Lines, tiles, and the crowd use the spot the slide is heading to."""
+        ease = self._listen_ease
+        if ease is not None and tid == ease[0]:
+            return ease[2]
+        return self._positions[tid]
+
+    def _paint_baked_star(self, painter: QPainter, item: RankedTrack, pos: QPointF, density: bool) -> None:
+        """One quiet star: body, loved ring, pin. Scene coordinates."""
+        radius, color, bloom = self._night_star(item, density)
+        haze = sky_haze(self._sky_band)
+        painter.setPen(Qt.PenStyle.NoPen)
+        if haze > 0.05:
+            mist = QColor(206, 214, 232)
+            mist.setAlpha(int(22 + 50 * haze))
+            painter.setBrush(QBrush(mist))
+            painter.drawEllipse(pos, radius * (2.4 + 1.8 * haze), radius * (2.4 + 1.8 * haze))
+            color = QColor(color)
+            color.setAlpha(max(48, int(color.alpha() * (1.0 - 0.32 * haze))))
+        if bloom:
+            glow = QColor(color)
+            glow.setAlpha(bloom)
+            painter.setBrush(QBrush(glow))
+            painter.drawEllipse(pos, radius * 3.4, radius * 3.4)
+        painter.setBrush(QBrush(color))
+        painter.drawEllipse(pos, radius, radius)
+        if item.track.loved and not item.track.pinned and item.track.id != self._current_id:
+            loved_ring = QPen(LOVED_RING_QCOLOR, 1.2)
+            painter.setPen(loved_ring)
+            painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+            painter.drawEllipse(pos, radius + 1.35, radius + 1.35)
+            painter.setPen(Qt.PenStyle.NoPen)
+        if item.track.pinned:
+            ring = QPen(PIN_RING_QCOLOR, 1.05)
+            painter.setPen(ring)
+            painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+            painter.drawEllipse(pos, radius + 2.2, radius + 2.2)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(PIN_RING_QCOLOR))
+            painter.drawEllipse(
+                QPointF(pos.x(), pos.y() - radius - 2.6),
+                PIN_HEAD_RADIUS * 0.85,
+                PIN_HEAD_RADIUS * 0.85,
+            )
+
+    def _stamp_eased_star(self, tid: int) -> None:
+        """Paint one settled star onto the sky. Avoids redrawing the whole field."""
+        item = self._ranked.get(tid)
+        pos = self._positions.get(tid)
+        pix = self._field.pixmap()
+        if item is None or pos is None or pix.isNull():
+            if tid in self._ranked:
+                self._rebuild_starfield()
+            return
+        image = pix.toImage()
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.scale(FIELD_SCALE, FIELD_SCALE)
+        self._paint_baked_star(painter, item, pos, len(self._ranked) > 1200)
+        painter.end()
+        self._field.setPixmap(QPixmap.fromImage(image))
+
     def _field_signature(self) -> object:
         """Cheap fingerprint so play/nudge/lens refresh can skip a full rebake."""
         parts: list[tuple] = []
@@ -1822,7 +1902,7 @@ class MoodMap(QGraphicsView):
             r = self._ranked[tid]
             # The slide moves every frame. The bake stays put until the star settles.
             if self._listen_ease is not None and tid == easing_id:
-                p = self._listen_ease[1]
+                p = self._listen_ease[2]
             else:
                 p = self._positions[tid]
             conf = read_mood_confidence(r.track)
@@ -1889,7 +1969,7 @@ class MoodMap(QGraphicsView):
             cell = 10.0
             counts: dict[tuple[int, int], int] = {}
             for item in order:
-                pos = self._positions[item.track.id]
+                pos = self._model_pos(item.track.id)
                 key = (int(pos.x() // cell), int(pos.y() // cell))
                 counts[key] = counts.get(key, 0) + 1
             for (cx, cy), count in counts.items():
@@ -1910,43 +1990,7 @@ class MoodMap(QGraphicsView):
         for item in order:
             if item.track.id == easing_id:
                 continue
-            pos = self._positions[item.track.id]
-            radius, color, bloom = self._night_star(item, density_mode)
-            haze = sky_haze(self._sky_band)
-            if haze > 0.05:
-                mist = QColor(206, 214, 232)
-                mist.setAlpha(int(22 + 50 * haze))
-                painter.setBrush(QBrush(mist))
-                painter.drawEllipse(pos, radius * (2.4 + 1.8 * haze), radius * (2.4 + 1.8 * haze))
-                color = QColor(color)
-                color.setAlpha(max(48, int(color.alpha() * (1.0 - 0.32 * haze))))
-            if bloom:
-                glow = QColor(color)
-                glow.setAlpha(bloom)
-                painter.setBrush(QBrush(glow))
-                painter.drawEllipse(pos, radius * 3.4, radius * 3.4)
-            painter.setBrush(QBrush(color))
-            painter.drawEllipse(pos, radius, radius)
-            # Warm ring so a loved star still reads on the baked sky, not only when zoomed in.
-            if item.track.loved and not item.track.pinned and item.track.id != self._current_id:
-                loved_ring = QPen(LOVED_RING_QCOLOR, 1.2)
-                painter.setPen(loved_ring)
-                painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
-                painter.drawEllipse(pos, radius + 1.35, radius + 1.35)
-                painter.setPen(Qt.PenStyle.NoPen)
-            # Lock ring + tack so pins read on the baked sky (not only live LOD).
-            if item.track.pinned:
-                ring = QPen(PIN_RING_QCOLOR, 1.05)
-                painter.setPen(ring)
-                painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
-                painter.drawEllipse(pos, radius + 2.2, radius + 2.2)
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QBrush(PIN_RING_QCOLOR))
-                painter.drawEllipse(
-                    QPointF(pos.x(), pos.y() - radius - 2.6),
-                    PIN_HEAD_RADIUS * 0.85,
-                    PIN_HEAD_RADIUS * 0.85,
-                )
+            self._paint_baked_star(painter, item, self._positions[item.track.id], density_mode)
         painter.end()
         pix = QPixmap.fromImage(img)
         self._field.setPixmap(pix)
@@ -1973,14 +2017,14 @@ class MoodMap(QGraphicsView):
             )
         )
         positions = tuple(
-            (tid, round(self._positions[tid].x(), 1), round(self._positions[tid].y(), 1))
+            (tid, round(self._model_pos(tid).x(), 1), round(self._model_pos(tid).y(), 1))
             for tid in sorted(self._positions)
         )
         return (self._sky_band, protected, positions)
 
     def _protected_region_points(self) -> np.ndarray:
         pts = [
-            (self._positions[tid].x(), self._positions[tid].y())
+            (self._model_pos(tid).x(), self._model_pos(tid).y())
             for tid, item in self._ranked.items()
             if tid in self._positions and (item.track.pinned or item.track.loved)
         ]
@@ -1992,7 +2036,7 @@ class MoodMap(QGraphicsView):
         if not self._positions:
             return QPixmap()
         points = np.array(
-            [[self._positions[tid].x(), self._positions[tid].y()] for tid in self._positions],
+            [[self._model_pos(tid).x(), self._model_pos(tid).y()] for tid in self._positions],
             dtype=np.float32,
         )
         protect = self._protected_region_points()
@@ -2100,7 +2144,7 @@ class MoodMap(QGraphicsView):
 
     def _refresh_crowd(self) -> None:
         self._crowd_ids = crowd_ids(
-            [(tid, pos.x(), pos.y()) for tid, pos in self._positions.items()]
+            [(tid, self._model_pos(tid).x(), self._model_pos(tid).y()) for tid in self._positions]
         )
 
     def _keeps_glow(self, tid: int, item: RankedTrack) -> bool:
@@ -2118,7 +2162,7 @@ class MoodMap(QGraphicsView):
 
     def _constellation_segments(self) -> list[tuple[float, float, float, float, float]]:
         """Links for the baked sky. Reused while stars stay put, so a lens recolor is cheap."""
-        points = [(tid, pos.x(), pos.y()) for tid, pos in self._positions.items()]
+        points = [(tid, self._model_pos(tid).x(), self._model_pos(tid).y()) for tid in self._positions]
         if len(points) < 2:
             self._link_cache_key = None
             self._link_cache = []
@@ -2234,7 +2278,10 @@ class MoodMap(QGraphicsView):
         painter.translate(-x0, -y0)
         density = len(self._ranked) > 1200
         painter.setPen(Qt.PenStyle.NoPen)
+        easing_id = self._listen_ease[0] if self._listen_ease is not None else None
         for item in self._ranked.values():
+            if item.track.id == easing_id:
+                continue
             pos = self._positions.get(item.track.id)
             if pos is None or not self.star_in_lens(pos):
                 continue
@@ -2274,9 +2321,9 @@ class MoodMap(QGraphicsView):
         """Open path through the committed queue. Brightest on the song that is playing."""
         points: list[tuple[int, QPointF]] = []
         for tid in self._queue_order:
-            pos = self._positions.get(tid)
-            if pos is not None:
-                points.append((tid, pos))
+            if tid not in self._positions:
+                continue
+            points.append((tid, self._model_pos(tid)))
         if len(points) < 2:
             self._route.setPixmap(QPixmap())
             return
