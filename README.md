@@ -13,6 +13,8 @@ Drag the lens to the part of the sky you feel like. The four lists beside the ma
 
 When that neighborhood feels right, press **Renew**. That commits the queue.
 
+A finish or a skip slides that unpinned star a short way, and leaves a faint mark where it was. Search draws a brief line from the lens to the song you picked, then the line fades. A weak guess, including a confidence of zero, stays a dim star.
+
 ![A look at the sky](docs/screenshots/01-overview.png)
 
 <p align="center">

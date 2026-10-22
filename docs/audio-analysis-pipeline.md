@@ -68,7 +68,7 @@ Still on each already-decoded buffer (no extra “go fetch more audio” beyond 
 - How much the sound changes over time  
 - How even or punchy the loudness is  
 - How regular or jumpy the hits are  
-- Spoken non-musical frames dropped when real music remains  
+- Spoken non-musical frames dropped when real music remains. A window that is mostly speech is remembered and can dim confidence. A borderline musical frame is not counted as speech.  
 
 Then it squashes all of that into the two map directions: **Glow** and **Kinetic**.  
 Multi-window listens may also store a simple **shape** note (steady / build / drop / bookend) and a **steer weight** for the queue — not new map axes.
@@ -77,13 +77,15 @@ Simple rules of thumb Meridian tries to follow:
 
 - Quiet hiss should **not** look bright and happy.  
 - Brightness belongs on Glow, not “fake energy.” Clear harmonic tone may set Glow from pitch height; muffled listens stay nearer the sticker.  
-- Weird / jumpy timing is a **texture**, not automatic “this is energetic.” Muddy pulse skips the BPM→Kinetic step.  
+- Weird / jumpy timing is a **texture**, not automatic “this is energetic.” A muddy pulse skips the BPM→Kinetic step. A beat that does not land on the heard hits is refused. A fast song whose tracker locked to half speed is checked on a double-time grid before that refusal, so a real fast pulse is kept. A refused pulse does not push Kinetic and does not take the BPM bonus. A tag BPM can still set the pace.
+- Quiet but even hits are not treated as faint just because the master is quiet. Hit strength is compared inside the song.
+- A clear tone may set Glow from pitch height. A melody that wanders an octave can still count as one held pitch. A pitch that will not hold does not get to move Glow. Muffled listens stay nearer the sticker.
 - Uneven, punchy loudness feels more Kinetic than flat, even loudness.  
 - Blend leans toward windows that are both tonal and onset-solid (a flashy sting can’t become the whole song).
 
 ### 5. Save the result
 
-It stores the map position, a confidence note (“how sure are we” — multi-window listens say so), shape/timbre/steer leftovers when known, and a few other clues (brightness, flux, steady rhythm) for later tidy-ups — **without** listening again.
+It stores the map position, a confidence note (“how sure are we” — multi-window listens say so), shape/timbre/steer leftovers when known, and a few other clues (brightness, flux, steady rhythm, speech share, whether the pulse was refused) for later tidy-ups — **without** listening again. A stored confidence of exactly zero stays rock-bottom. A missing confidence is the neutral middle, not the same thing as zero.
 
 **Rescan / mtime refresh:** when Meridian clears the “analyzed” flag so a track will be listened to again, it still **keeps the existing PCM mood coords** if leftover brightness/flux clues remain — so Rescan does not flash stars back to genre seeds until a new successful decode lands. Section blend weights are deterministic (no random jitter on merge).
 

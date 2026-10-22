@@ -1,0 +1,16 @@
+---
+description: Update changelog, README, and guides in the same commit before pushing to GitHub
+alwaysApply: true
+---
+
+# Docs travel with every GitHub push
+
+Before `git push` of Meridian-lab changes, update the docs that the commit changes and include those edits in the same commit on `main`.
+
+- `CHANGELOG.md` — a plain-language bullet for each user-visible change. Do not move the published release date unless that GitHub release asset was actually replaced.
+- `README.md` — only if the short “what this is / how you use it” page would be wrong without the change.
+- `docs/audio-analysis-pipeline.md` and `docs/placement-pipeline.md` — when listen or placement behavior changed.
+- `docs/README.md` — when a guide’s promise changed.
+- `POPULATE.md` — when setup facts (what lab `main` contains, how to open it) changed.
+
+Write the behavior the code has now. Skip docs that the change does not touch. Push only after those updates are committed.

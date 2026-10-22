@@ -4,7 +4,7 @@
 
 ## 1. File tree
 
-The lab working tree already matches `dark1ltg/Meridian` at `b48f89d` (application source, tests, packaging, fonts, and screenshots). History was not mirrored; lab commits stay on `main`.
+Lab `main` started from `dark1ltg/Meridian` at `b48f89d` and has moved on (night-sky experiments, a more honest short listen, and the slide and search-line on the map). History was not mirrored; lab commits stay on `main`. See [CHANGELOG.md](CHANGELOG.md).
 
 To replace this repo with a full history mirror later, from a machine logged in as **dark1ltg**:
 

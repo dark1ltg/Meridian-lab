@@ -56,6 +56,7 @@ It does **not** mean “ignore everything and max out the waveform.”
 ### 4. Tiny tempo tweak
 
 BPM can give Kinetic a small push — but only when the pulse sounds clear enough.  
+A refused pulse skips that push and skips the BPM bonus. A tag BPM can still set the pace. A fast song is not refused just because the tracker locked to half speed.  
 If the tag tempo and the heard tempo disagree, Meridian picks carefully (steady rhythm → heard tempo can win the nudge; otherwise the tag stays in charge).  
 On the “stay near the sticker” path, tempo still can’t kick the star outside that soft neighborhood.
 
@@ -65,6 +66,7 @@ Title/artist mood words that clearly fight a **steady** listen are undone; **gen
 
 Meridian stores a confidence note (tag? path? listen? conflict?).  
 Low confidence means “take this with a grain of salt” in the UI — it doesn’t invent a third map axis.  
+A confidence of exactly zero draws as a weak pewter star. If the number is missing, the star uses the neutral middle. Those two are not the same.  
 Focus / NOW ranking gives a **light** lift to higher-confidence listens over dim scrapes at similar distance — not enough to bury a clearly closer neighbor.  
 Full multi-window listens **steer** the queue more; seed-only / intro-only listens stay out of NOW unless the neighborhood has nothing better (pins and loved tracks still qualify). Shape/timbre leftovers gently bias Dim / Charge / Focus — still the same two map axes.
 
@@ -114,6 +116,8 @@ Rough / partial listens (seed-only, intro-only, end-only) can get nudged toward 
 ## After the star is placed
 
 While you listen, finishes and skips can gently nudge **unpinned** stars relative to where your lens is.  
+That nudge is drawn as a short slide. A pewter ghost stays on the old spot for about a second. Clicks follow the moving star. A press during the slide keeps the star on the sky. Constellation lines, neighborhood tiles, and the queue path aim at the new spot when the slide starts. A **pin does not slide**.  
+Choosing a search result moves the lens, which was already allowed. A short cool line shows the trip, then fades. That line is not the queue path. If the lens is already on that song, no line is drawn.  
 The matrix and context queue use those positions to pick “what’s near the lens” — that’s ranking, not a brand-new analyze.
 
 ## Where the code lives (if you care)
