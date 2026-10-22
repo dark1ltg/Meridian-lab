@@ -1351,6 +1351,40 @@ def _avg_attr(profiles: list, attr: str, default: float, weights: list[float] | 
     )
 
 
+def _optional_profile_float(profile: object, attr: str) -> float | None:
+    raw = getattr(profile, attr, None)
+    if raw is None:
+        return None
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(val):
+        return None
+    return val
+
+
+def _blend_speech_share(profiles: list) -> float:
+    """Window-weighted share of spoken frames. A spoken intro must not dim the body."""
+    if not profiles:
+        return 0.0
+    counts = [max(int(getattr(p, "window_count", 0) or 0), 0) for p in profiles]
+    if sum(counts) <= 0:
+        counts = [1] * len(profiles)
+    total = float(sum(counts))
+    acc = 0.0
+    for profile, count in zip(profiles, counts):
+        acc += float(getattr(profile, "speech_share", 0.0) or 0.0) * count
+    return float(acc / total)
+
+
+def _merged_pulse_rejected(profiles: list, bpm: float | None) -> bool:
+    """A trusted BPM from any section keeps the pulse. Refusal sticks only when none survived."""
+    if bpm is not None:
+        return False
+    return any(bool(getattr(p, "pulse_rejected", False)) for p in profiles)
+
+
 def _blend_band_energy(profiles: list, weights: list[float]) -> dict[str, float]:
     """Weight-average partition bands (no sub_bass key — parallel leftover only)."""
     keys = ("bass", "low_mid", "mid", "high_mid", "high")
@@ -1615,6 +1649,11 @@ def _merge_two_pcm_profiles(primary, secondary):
         ),
         sub_bass=float(_avg_attr(slope_profiles, "sub_bass", 0.0, slope_weights)),
         zcr=float(_avg_attr(slope_profiles, "zcr", 0.0, slope_weights)),
+        speech_share=_blend_speech_share([primary, secondary]),
+        onset_strength=_optional_profile_float(ostats_src, "onset_strength"),
+        tempo_confidence=_optional_profile_float(ostats_src, "tempo_confidence"),
+        beat_alignment=_optional_profile_float(ostats_src, "beat_alignment"),
+        pulse_rejected=_merged_pulse_rejected([primary, secondary], bpm),
     )
 
 
@@ -1679,6 +1718,11 @@ def _weighted_profile_blend(items: list[tuple[object, float]]):
         spectral_slope=float(_avg_attr(profiles, "spectral_slope", 0.5, weights)),
         sub_bass=float(_avg_attr(profiles, "sub_bass", 0.0, weights)),
         zcr=float(_avg_attr(profiles, "zcr", 0.0, weights)),
+        speech_share=_blend_speech_share(profiles),
+        onset_strength=_optional_profile_float(anchor, "onset_strength"),
+        tempo_confidence=_optional_profile_float(anchor, "tempo_confidence"),
+        beat_alignment=_optional_profile_float(anchor, "beat_alignment"),
+        pulse_rejected=_merged_pulse_rejected(profiles, bpm),
     )
 
 
@@ -2072,6 +2116,9 @@ def mood_confidence(
     flux: float | None = None,
     onset_consistency: float | None = None,
     multi_window: bool = False,
+    speech_share: float = 0.0,
+    onset_strength: float | None = None,
+    pulse_rejected: bool = False,
 ) -> tuple[float, str]:
     """Graduated placement confidence in 0..1 plus a short evidence note for tooltips."""
     from meridian.acoustic import confidence_from_evidence
@@ -2093,6 +2140,9 @@ def mood_confidence(
         onset_consistency=onset_consistency,
         genre_conflict=_genre_pair_conflict(tag_key, path_key),
         multi_window=multi_window,
+        speech_share=speech_share,
+        onset_strength=onset_strength,
+        pulse_rejected=pulse_rejected,
     )
 
 
@@ -2282,6 +2332,10 @@ def analyze_audio(
         if edge_salvage:
             multi_window = False
         detected_bpm = _coerce_bpm(detected_bpm)
+        # A refused pulse must not widen Kinetic or confirm a tag BPM.
+        pulse_rejected = bool(profile is not None and getattr(profile, "pulse_rejected", False))
+        if pulse_rejected:
+            detected_bpm = None
 
         onset_c = _finite_attr(profile, "onset_consistency", 0.5) if profile else 0.5
         variation = _finite_attr(profile, "variation", 0.0) if profile else 0.0
@@ -2505,25 +2559,28 @@ def analyze_audio(
     onset_for_bpm = _finite_attr(profile, "onset_consistency", 0.5) if profile else 0.5
     variation_for_bpm = _finite_attr(profile, "variation", 0.0) if profile else 0.0
     # Pulse clarity — not the BPM number alone — permits a Kinetic step when pulse
-    # was measured. Without PCM, keep the prior tag-BPM nudge.
+    # was measured. A refused pulse skips the step entirely. Without PCM, keep the
+    # prior tag-BPM nudge.
+    pulse_rejected = bool(profile is not None and getattr(profile, "pulse_rejected", False))
     if pcm_ok:
-        pulse_clear = bool(
-            onset_for_bpm >= PULSE_CLARITY_BPM_MIN
-            and not bool(pcm_unstable)
-            and variation_for_bpm < 0.28
-        )
-        if pulse_clear:
-            nudge_bpm = _energy_bpm_for_nudge(
-                tag_bpm,
-                detected_bpm,
-                onset_consistency=onset_for_bpm,
-                unstable=bool(pcm_unstable),
+        if not pulse_rejected:
+            pulse_clear = bool(
+                onset_for_bpm >= PULSE_CLARITY_BPM_MIN
+                and not bool(pcm_unstable)
+                and variation_for_bpm < 0.28
             )
-            energy = _bpm_nudge(
-                energy,
-                nudge_bpm,
-                soft=soft_pcm_only or (tag_bpm is None and detected_bpm is not None),
-            )
+            if pulse_clear:
+                nudge_bpm = _energy_bpm_for_nudge(
+                    tag_bpm,
+                    detected_bpm,
+                    onset_consistency=onset_for_bpm,
+                    unstable=bool(pcm_unstable),
+                )
+                energy = _bpm_nudge(
+                    energy,
+                    nudge_bpm,
+                    soft=soft_pcm_only or (tag_bpm is None and detected_bpm is not None),
+                )
     else:
         energy = _bpm_nudge(energy, tag_bpm, soft=soft_pcm_only)
     if soft_pcm_only and pcm_ok:
@@ -2575,14 +2632,16 @@ def analyze_audio(
 
     bpm_conflict = False
     bpm_ok = False
-    if tag_bpm is not None and detected_bpm is not None:
-        if abs(float(tag_bpm) - float(detected_bpm)) > 18.0:
-            bpm_conflict = True
-        else:
+    # A refused pulse does not confirm the tag and does not fight it.
+    if not pulse_rejected:
+        if tag_bpm is not None and detected_bpm is not None:
+            if abs(float(tag_bpm) - float(detected_bpm)) > 18.0:
+                bpm_conflict = True
+            else:
+                bpm_ok = True
+        elif tag_bpm is not None or detected_bpm is not None:
+            # Only credit BPM when we have a coerced (finite, positive) value.
             bpm_ok = True
-    elif tag_bpm is not None or detected_bpm is not None:
-        # Only credit BPM when we have a coerced (finite, positive) value.
-        bpm_ok = True
 
     if not np.isfinite(valence):
         valence = float(seed_v)
@@ -2607,6 +2666,9 @@ def analyze_audio(
         flux=float(getattr(profile, "flux", 0.0)) if profile else None,
         onset_consistency=float(getattr(profile, "onset_consistency", 0.5)) if profile else None,
         multi_window=multi_window,
+        speech_share=float(getattr(profile, "speech_share", 0.0) or 0.0) if profile else 0.0,
+        onset_strength=_optional_profile_float(profile, "onset_strength") if profile else None,
+        pulse_rejected=pulse_rejected,
     )
     if edge_salvage:
         # Keep edge salvage clearly weaker than seed-only / mid-body (dimmer on map).

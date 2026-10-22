@@ -120,6 +120,41 @@ def test_soft_pcm_bpm_stays_clamped() -> None:
     assert abs(result.energy - seed.energy) <= EVIDENCE_SOFT_ENERGY_MAX + 1e-9
 
 
+def test_onset_stats_keeps_a_landed_pulse_and_drops_a_fake_one() -> None:
+    """A grid the hits land on stays. A shifted or unsure tempo is refused."""
+    pytest = __import__("pytest")
+    aubio = pytest.importorskip("aubio")
+    del aubio
+    sr = SAMPLERATE
+
+    def _bursts(bpm: float, *, regular: bool) -> np.ndarray:
+        seconds = 8.0
+        n = int(sr * seconds)
+        y = np.zeros(n, dtype=np.float32)
+        rng = np.random.default_rng(9)
+        length = int(0.05 * sr)
+        t = 0.15
+        tt = np.arange(n) / sr
+        y += (0.12 * np.sin(2 * np.pi * 98.0 * tt)).astype(np.float32)
+        while t < seconds - 0.15:
+            i = int(t * sr)
+            env = np.exp(-np.arange(length) / (0.01 * sr)).astype(np.float32)
+            burst = (0.9 * env * rng.standard_normal(length)).astype(np.float32)
+            if i + length <= n:
+                y[i : i + length] += burst
+            t += (60.0 / bpm) if regular else float(rng.uniform(0.17, 0.73))
+        return y
+
+    bpm, stats = onset_stats(_bursts(90.0, regular=True))
+    assert bpm is not None
+    assert stats["pulse_rejected"] == 0.0
+    assert stats["beat_alignment"] >= 0.55
+
+    fake_bpm, fake_stats = onset_stats(_bursts(90.0, regular=False))
+    assert fake_bpm is None
+    assert fake_stats["pulse_rejected"] == 1.0
+
+
 def test_onset_stats_rejects_spurious_bpm() -> None:
     """Silence / no-onset PCM must not invent a BPM."""
     sr = SAMPLERATE

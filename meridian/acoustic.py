@@ -14,6 +14,20 @@ import numpy as np
 
 SAMPLERATE = 11025
 
+# Share of hits that must land on the beat grid. Below this, the BPM is a fake pulse.
+BEAT_ALIGN_MIN = 0.55
+# Aubio tempo confidence below this is an unsure tracker. A sure-but-wrong tempo can still score high.
+TEMPO_CONF_MIN = 0.25
+# Median thresholded onset strength below this: the hits that fired were faint.
+FAINT_ONSET_MAX = 200.0
+# Autocorr peak must clear this or Glow stays on brightness.
+PITCH_PEAK_CLEAR = 0.50
+# Relative spread, or max/min span, above which the note did not hold still.
+PITCH_WANDER_REL = 0.12
+PITCH_WANDER_SPAN = 1.5
+# Most of the local windows were spoken.
+SPEECH_SHARE_MOST = 0.50
+
 
 @dataclass
 class AcousticProfile:
@@ -46,6 +60,17 @@ class AcousticProfile:
     # Energy share under ~80 Hz (one light Shadow vote upstream).
     sub_bass: float = 0.0
     zcr: float = 0.0
+    # Listen leftovers. None / False means "not judged", so old profiles stay put.
+    # Fraction of local windows that were spoken. Placement already dropped them.
+    speech_share: float = 0.0
+    # Median thresholded onset strength. None when there were too few hits to judge.
+    onset_strength: float | None = None
+    # Aubio's own tempo certainty. None when the tracker was not read.
+    tempo_confidence: float | None = None
+    # Share of hits that land on the beat grid. None when there is no grid to check.
+    beat_alignment: float | None = None
+    # A BPM was proposed and then refused (unsure tracker, or hits miss the beats).
+    pulse_rejected: bool = False
 
 
 # Target RMS for analysis-only loudness normalization (fixes hot-master Kinetic leak).
@@ -243,22 +268,22 @@ def frame_periodicity(frame: np.ndarray, samplerate: int = SAMPLERATE) -> float:
     return float(np.clip(peak_val, 0.0, 1.0))
 
 
-def estimate_pitch_hz(
+def estimate_pitch_detail(
     frame: np.ndarray, samplerate: int = SAMPLERATE, *, fmin: float = 80.0, fmax: float = 1000.0
-) -> float | None:
-    """Lightweight autocorrelation F0 proxy — None when no clear period."""
+) -> tuple[float | None, float]:
+    """F0 proxy plus autocorr peak height. ``(None, peak)`` when the period is unclear."""
     mono = np.ascontiguousarray(frame, dtype=np.float64)
     if mono.size < int(samplerate / fmin) + 16:
-        return None
+        return None, 0.0
     mono = mono - float(np.mean(mono))
     rms = float(np.sqrt(np.mean(mono * mono)) + 1e-12)
     if rms < 1e-8:
-        return None
+        return None, 0.0
     mono = mono / rms
     lag_min = max(1, int(samplerate / fmax))
     lag_max = min(mono.size // 2, int(samplerate / fmin))
     if lag_max <= lag_min + 2:
-        return None
+        return None, 0.0
     # Biased autocorr via FFT (same length).
     n_fft = 1
     while n_fft < 2 * mono.size:
@@ -266,22 +291,30 @@ def estimate_pitch_hz(
     spec = np.fft.rfft(mono, n=n_fft)
     ac = np.fft.irfft(spec * np.conj(spec), n=n_fft)[: mono.size]
     if ac[0] <= 1e-12:
-        return None
+        return None, 0.0
     ac = ac / ac[0]
     region = ac[lag_min : lag_max + 1]
     if region.size < 3:
-        return None
+        return None, 0.0
     peak_i = int(np.argmax(region))
     peak_val = float(region[peak_i])
     # Require a clear periodic peak (sung/tonal); reject noise.
     if peak_val < 0.35:
-        return None
+        return None, peak_val
     lag = lag_min + peak_i
     if lag <= 0:
-        return None
+        return None, peak_val
     hz = float(samplerate) / float(lag)
     if not (fmin <= hz <= fmax) or not np.isfinite(hz):
-        return None
+        return None, peak_val
+    return hz, peak_val
+
+
+def estimate_pitch_hz(
+    frame: np.ndarray, samplerate: int = SAMPLERATE, *, fmin: float = 80.0, fmax: float = 1000.0
+) -> float | None:
+    """Lightweight autocorrelation F0 proxy — None when no clear period."""
+    hz, _peak = estimate_pitch_detail(frame, samplerate, fmin=fmin, fmax=fmax)
     return hz
 
 
@@ -290,6 +323,30 @@ def normalize_pitch_glow(pitch_hz: float) -> float:
     hz = max(80.0, float(pitch_hz))
     mapped = np.log1p((hz - 80.0) / 120.0) / np.log1p((800.0 - 80.0) / 120.0)
     return float(np.clip(mapped, 0.05, 0.95))
+
+
+def pitch_holds(hz_values: list[float], peaks: list[float]) -> bool:
+    """True when the accepted F0s are one clear note, not a wander or a weak peak.
+
+    One accepted window can still count: there is no second note to disagree with.
+    """
+    if not hz_values or not peaks or len(hz_values) != len(peaks):
+        return False
+    peak = float(np.median(np.asarray(peaks, dtype=np.float64)))
+    if not np.isfinite(peak) or peak < PITCH_PEAK_CLEAR:
+        return False
+    if len(hz_values) < 2:
+        return True
+    hz = np.asarray(hz_values, dtype=np.float64)
+    med = float(np.median(hz))
+    if not np.isfinite(med) or med <= 1.0:
+        return False
+    rel = float(np.std(hz) / med)
+    lo = float(np.min(hz))
+    span = float(np.max(hz) / max(lo, 1.0))
+    if rel > PITCH_WANDER_REL or span > PITCH_WANDER_SPAN:
+        return False
+    return True
 
 
 def is_dialogue_frame(
@@ -474,39 +531,87 @@ def energy_stats(pcm: np.ndarray) -> dict[str, float]:
     }
 
 
+def _empty_onset_stats() -> dict[str, float]:
+    return {
+        "kinetic": 0.5,
+        "rate": 0.0,
+        "burstiness": 0.0,
+        "consistency": 0.5,
+        "density": 0.0,
+        "beat_alignment": float("nan"),
+        "tempo_confidence": float("nan"),
+        "onset_strength": float("nan"),
+        "pulse_rejected": 0.0,
+    }
+
+
+def _aubio_hit(flag: object) -> bool:
+    """True when an aubio detector returns a non-zero event marker."""
+    try:
+        val = float(np.asarray(flag).ravel()[0])
+    except (TypeError, ValueError, IndexError):
+        return False
+    return bool(np.isfinite(val) and val != 0.0)
+
+
+def beat_hit_alignment(
+    onset_times: list[float],
+    beat_times: list[float],
+    bpm: float,
+    *,
+    hop_s: float,
+) -> float | None:
+    """Share of hits that land on a beat. None when there is no grid worth checking."""
+    if len(onset_times) < 4 or len(beat_times) < 4:
+        return None
+    if not np.isfinite(bpm) or bpm <= 1.0:
+        return None
+    period = 60.0 / float(bpm)
+    tol = max(float(hop_s), 0.18 * period)
+    beats = np.asarray(beat_times, dtype=np.float64)
+    hits = 0
+    for t in onset_times:
+        if float(np.min(np.abs(beats - float(t)))) <= tol:
+            hits += 1
+    return float(hits / len(onset_times))
+
+
 def onset_stats(pcm: np.ndarray, samplerate: int = SAMPLERATE) -> tuple[float | None, dict[str, float]]:
     """aubio onset/tempo pass — keep timing stats from the existing hop walk."""
     try:
         import aubio
     except ImportError:
-        return None, {
-            "kinetic": 0.5,
-            "rate": 0.0,
-            "burstiness": 0.0,
-            "consistency": 0.5,
-            "density": 0.0,
-        }
+        return None, _empty_onset_stats()
 
     win_s = 512
     hop_s = 256
     if pcm.size < hop_s * 4:
-        return None, {
-            "kinetic": 0.5,
-            "rate": 0.0,
-            "burstiness": 0.0,
-            "consistency": 0.5,
-            "density": 0.0,
-        }
+        return None, _empty_onset_stats()
 
     mono = np.ascontiguousarray(pcm, dtype=np.float32)
     tempo_o = aubio.tempo("default", win_s, hop_s, samplerate)
     onset_o = aubio.onset("default", win_s, hop_s, samplerate)
     onset_times: list[float] = []
+    onset_marks: list[float] = []
+    strengths: list[float] = []
+    beat_times: list[float] = []
     for i in range(0, mono.size - hop_s + 1, hop_s):
         frame = mono[i : i + hop_s]
-        if onset_o(frame):
+        if _aubio_hit(onset_o(frame)):
+            # Hop index stays the timing source for rate / burstiness / density.
             onset_times.append(i / float(samplerate))
-        tempo_o(frame)
+            try:
+                onset_marks.append(float(onset_o.get_last_s()))
+                strengths.append(float(onset_o.get_thresholded_descriptor()))
+            except (AttributeError, TypeError, ValueError):
+                pass
+        if _aubio_hit(tempo_o(frame)):
+            try:
+                last = float(tempo_o.get_last_s())
+            except (AttributeError, TypeError, ValueError):
+                last = float("nan")
+            if np.isfinite(last) and (not beat_times or abs(beat_times[-1] - last) > 1e-3):
+                beat_times.append(last)
 
     duration_s = max(mono.size / float(samplerate), 1e-3)
     rate = len(onset_times) / duration_s
@@ -532,18 +637,46 @@ def onset_stats(pcm: np.ndarray, samplerate: int = SAMPLERATE) -> tuple[float | 
         density = float(np.clip(np.mean(counts) / 4.0, 0.0, 1.0))
 
     bpm = float(tempo_o.get_bpm())
+    try:
+        tempo_conf = float(tempo_o.get_confidence())
+    except (AttributeError, TypeError, ValueError):
+        tempo_conf = float("nan")
+    if not np.isfinite(tempo_conf):
+        tempo_conf = float("nan")
+
+    alignment = beat_hit_alignment(
+        onset_marks,
+        beat_times,
+        bpm,
+        hop_s=hop_s / float(samplerate),
+    )
+    # Too few hits to call them faint. NaN means "not judged".
+    if len(strengths) >= 4:
+        onset_strength = float(np.median(np.asarray(strengths, dtype=np.float64)))
+    else:
+        onset_strength = float("nan")
+
     bpm_out: float | None
+    pulse_rejected = 0.0
     # Require real onset evidence — aubio often invents ~60–90 BPM on silence.
-    if (
+    candidate = not (
         len(onset_times) < 3
         or rate < 0.25
         or not np.isfinite(bpm)
         or bpm < 40.0
         or bpm > 220.0
-    ):
+    )
+    if not candidate:
         bpm_out = None
     else:
-        bpm_out = bpm
+        # Confidence is the veto. The beat grid still refuses a sure-but-wrong tempo.
+        unsure = np.isfinite(tempo_conf) and tempo_conf < TEMPO_CONF_MIN
+        off_grid = alignment is not None and alignment < BEAT_ALIGN_MIN
+        if unsure or off_grid:
+            bpm_out = None
+            pulse_rejected = 1.0
+        else:
+            bpm_out = bpm
 
     return bpm_out, {
         "kinetic": kinetic,
@@ -551,6 +684,10 @@ def onset_stats(pcm: np.ndarray, samplerate: int = SAMPLERATE) -> tuple[float | 
         "burstiness": float(np.clip(burstiness, 0.0, 1.0)),
         "consistency": consistency,
         "density": density,
+        "beat_alignment": float(alignment) if alignment is not None else float("nan"),
+        "tempo_confidence": tempo_conf,
+        "onset_strength": onset_strength,
+        "pulse_rejected": pulse_rejected,
     }
 
 
@@ -615,6 +752,17 @@ def local_analysis_windows(pcm_size: int, n: int) -> list[int]:
     return starts if starts else [0]
 
 
+def _optional_stat(stats: dict[str, float], key: str) -> float | None:
+    raw = stats.get(key, float("nan"))
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(val):
+        return None
+    return val
+
+
 def build_profile(pcm: np.ndarray, samplerate: int = SAMPLERATE) -> AcousticProfile:
     """Expanded acoustic profile → still projects to valence/energy only."""
     pcm = trim_silence(np.ascontiguousarray(pcm, dtype=np.float32))
@@ -653,6 +801,11 @@ def build_profile(pcm: np.ndarray, samplerate: int = SAMPLERATE) -> AcousticProf
         subs.append(sub)
         frame_starts.append(start)
         keep_mask.append(not dialogue)
+
+    n_win = len(keep_mask)
+    speech_share = (
+        float(sum(1 for kept in keep_mask if not kept) / n_win) if n_win else 0.0
+    )
 
     # Drop dialogue frames when at least one musical frame survives; else keep all.
     if any(keep_mask) and not all(keep_mask):
@@ -711,13 +864,16 @@ def build_profile(pcm: np.ndarray, samplerate: int = SAMPLERATE) -> AcousticProf
     # Real autocorrelation F0 proxy — not centroid-as-pitch.
     if tonal >= 0.55:
         pitch_vals: list[float] = []
+        pitch_peaks: list[float] = []
         for start in frame_starts or local_analysis_windows(pcm_n.size, n):
             end = min(start + n, pcm_n.size)
             chunk = pcm_n[start:end]
-            hz = estimate_pitch_hz(chunk, samplerate)
+            hz, peak = estimate_pitch_detail(chunk, samplerate)
             if hz is not None:
                 pitch_vals.append(hz)
-        if pitch_vals:
+                pitch_peaks.append(peak)
+        # A wandering or weak note does not get to steer Glow. Brightness stays.
+        if pitch_vals and pitch_holds(pitch_vals, pitch_peaks):
             pitch_v = normalize_pitch_glow(float(np.median(pitch_vals)))
             pitch_v = 0.50 + (pitch_v - 0.50) * audibility
             bright_term = pitch_v
@@ -845,6 +1001,11 @@ def build_profile(pcm: np.ndarray, samplerate: int = SAMPLERATE) -> AcousticProf
         spectral_slope=float(np.clip(slope_clarity, 0.0, 1.0)),
         sub_bass=float(np.clip(sub_bass, 0.0, 1.0)),
         zcr=float(zcr),
+        speech_share=float(np.clip(speech_share, 0.0, 1.0)),
+        onset_strength=_optional_stat(ostats, "onset_strength"),
+        tempo_confidence=_optional_stat(ostats, "tempo_confidence"),
+        beat_alignment=_optional_stat(ostats, "beat_alignment"),
+        pulse_rejected=float(ostats.get("pulse_rejected", 0.0) or 0.0) >= 0.5,
     )
 
 
@@ -866,6 +1027,9 @@ def confidence_from_evidence(
     onset_consistency: float | None = None,
     genre_conflict: bool = False,
     multi_window: bool = False,
+    speech_share: float = 0.0,
+    onset_strength: float | None = None,
+    pulse_rejected: bool = False,
 ) -> tuple[float, str]:
     """Graduated confidence: consistent evidence up, conflict/unstable down."""
     score = 0.0
@@ -911,6 +1075,23 @@ def confidence_from_evidence(
                 reasons.append("uneven rhythm")
         if flux is not None and flux > 0.85:
             score -= 0.02
+        if (
+            onset_strength is not None
+            and np.isfinite(float(onset_strength))
+            and float(onset_strength) < FAINT_ONSET_MAX
+        ):
+            score -= 0.02
+            reasons.append("faint hits")
+        try:
+            spoken = float(speech_share)
+        except (TypeError, ValueError):
+            spoken = 0.0
+        if np.isfinite(spoken) and spoken >= SPEECH_SHARE_MOST:
+            # The frames were already dropped. Remember that the listen was mostly speech.
+            score -= 0.10
+            reasons.append("spoken")
+        if pulse_rejected:
+            reasons.append("pulse miss")
     if bpm_conflict:
         score -= 0.04
         reasons.append("BPM conflict")
