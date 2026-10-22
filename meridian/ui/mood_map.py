@@ -387,9 +387,13 @@ VIEW_NATIVE_OUTLIER = 1.25
 LIVE_STARS_ZOOM = 2.4
 # From here until the live stars, one sharper picture of the patch on screen.
 # Built after the pinch stops. The wide picture covers the gesture itself.
+# Only one detail picture is kept: the mid one, or a tighter one just before
+# the clickable stars. The other is thrown away.
 NEAR_PATCH_ZOOM = 1.6
 NEAR_PATCH_SCALE = 4        # pixels per scene unit; the wide bake is FIELD_SCALE
 NEAR_PATCH_MARGIN = 0.35    # extra around the view so a short pan reuses the picture
+DETAIL_TIGHT_ZOOM = 2.2
+DETAIL_TIGHT_SCALE = 6
 LOD_LABEL_START = 2.6
 LOD_GLOW_START = 2.4
 # Wide-sky furniture (weather, cross, axis labels, constellations) is gone
@@ -1090,7 +1094,7 @@ class SkyLifeOverlay(QGraphicsItem):
 
 
 class MoodMap(QGraphicsView):
-    """Mood sky: one wide picture, a sharper patch after a medium zoom, live stars in close."""
+    """Mood sky: one model, one wide picture, one cached detail picture, live stars in close."""
 
     lens_changed = Signal(float, float, float)
     track_pinned = Signal(int, float, float)
@@ -1164,6 +1168,8 @@ class MoodMap(QGraphicsView):
         self._field_sig: object | None = None
         self._near_rect: QRectF | None = None
         self._near_sig: object | None = None
+        self._detail_name: str | None = None
+        self._detail_scale: int = NEAR_PATCH_SCALE
         self._region_pos_key: tuple | None = None
         self._region_coarse: QPixmap | None = None
         self._region_fine: QPixmap | None = None
@@ -1849,7 +1855,11 @@ class MoodMap(QGraphicsView):
         painter.drawLine(start, end)
 
     def _model_pos(self, tid: int) -> QPointF:
-        """Lines, tiles, and the crowd use the spot the slide is heading to."""
+        """The song's place. Pictures read this. They do not keep a place of their own.
+
+        A slide still draws the moving star from its live point. Lines, tiles,
+        and the crowd aim at the spot the slide is heading to.
+        """
         ease = self._listen_ease
         if ease is not None and tid == ease[0]:
             return ease[2]
@@ -2041,11 +2051,20 @@ class MoodMap(QGraphicsView):
     def _visible_scene_rect(self) -> QRectF:
         return self.mapToScene(self.viewport().rect()).boundingRect()
 
+    def _detail_choice(self) -> tuple[str, int] | None:
+        """Which one cached picture this zoom wants. None keeps the wide sky."""
+        zoom = self._user_zoom
+        if zoom < NEAR_PATCH_ZOOM or zoom >= LIVE_STARS_ZOOM:
+            return None
+        if zoom >= DETAIL_TIGHT_ZOOM:
+            return ("tight", DETAIL_TIGHT_SCALE)
+        return ("mid", NEAR_PATCH_SCALE)
+
     def _near_patch_active(self) -> bool:
-        """The sharper picture is for a settled medium zoom, not a pinch or a search."""
+        """A detail picture is for a settled medium zoom, not a pinch or a search."""
         if self._falling or self._zoom_active or self._panning or self._search_query:
             return False
-        return NEAR_PATCH_ZOOM <= self._user_zoom < LIVE_STARS_ZOOM
+        return self._detail_choice() is not None
 
     def _patch_rect_for(self, view: QRectF) -> QRectF:
         margin_x = view.width() * NEAR_PATCH_MARGIN
@@ -2053,10 +2072,21 @@ class MoodMap(QGraphicsView):
         rect = view.adjusted(-margin_x, -margin_y, margin_x, margin_y)
         return rect.intersected(QRectF(0, 0, SCENE_W, SCENE_H))
 
+    def _fit_detail_scale(self, rect: QRectF, scale: int) -> int:
+        """Keep the one picture from growing past a couple of full-sky bakes."""
+        limit = float(SCENE_W * SCENE_H * 16)
+        fitted = max(NEAR_PATCH_SCALE, int(scale))
+        while fitted > NEAR_PATCH_SCALE and rect.width() * rect.height() * fitted * fitted > limit:
+            fitted -= 1
+        return fitted
+
     def _near_cache_covers(self, view: QRectF) -> bool:
+        choice = self._detail_choice()
         cached = self._near_rect
         if (
-            cached is None
+            choice is None
+            or self._detail_name != choice[0]
+            or cached is None
             or self._near_sig != self._field_sig
             or self._near.pixmap().isNull()
         ):
@@ -2069,25 +2099,33 @@ class MoodMap(QGraphicsView):
 
     def _rebuild_near_patch(self, view: QRectF) -> None:
         """One sharper picture of the patch on screen. Same stars, same places."""
+        choice = self._detail_choice()
+        if choice is None:
+            self._hide_near_patch()
+            return
+        name, wanted = choice
         rect = self._patch_rect_for(view)
         if rect.width() < 8.0 or rect.height() < 8.0:
             self._hide_near_patch()
             return
-        width = max(1, int(round(rect.width() * NEAR_PATCH_SCALE)))
-        height = max(1, int(round(rect.height() * NEAR_PATCH_SCALE)))
+        scale = self._fit_detail_scale(rect, wanted)
+        width = max(1, int(round(rect.width() * scale)))
+        height = max(1, int(round(rect.height() * scale)))
         image = QImage(width, height, QImage.Format.Format_ARGB32_Premultiplied)
         image.fill(Qt.GlobalColor.transparent)
         painter = QPainter(image)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.scale(NEAR_PATCH_SCALE, NEAR_PATCH_SCALE)
+        painter.scale(scale, scale)
         painter.translate(-rect.x(), -rect.y())
         self._paint_star_layer(painter, rect)
         painter.end()
         self._near.setPixmap(QPixmap.fromImage(image))
-        self._near.setScale(1.0 / NEAR_PATCH_SCALE)
+        self._near.setScale(1.0 / scale)
         self._near.setPos(rect.topLeft())
         self._near_rect = rect
         self._near_sig = self._field_sig
+        self._detail_name = name
+        self._detail_scale = scale
 
     def _show_wide_stars(self) -> None:
         """Pinch and pan keep the one whole-sky picture until the gesture stops."""
@@ -2177,7 +2215,11 @@ class MoodMap(QGraphicsView):
         self._regions.setVisible(True)
 
     def _ensure_regions(self) -> None:
-        """Show neighborhood tiles. Positions bake both levels. Zoom only swaps them."""
+        """Neighborhood tiles from the same places as the stars.
+
+        The coarse picture is the wide sky. The finer one is built the first
+        time a zoom can show it, then kept. A fall does not swap pictures.
+        """
         key = self._region_position_key()
         if key != self._region_pos_key:
             self._region_pos_key = key
@@ -2191,10 +2233,12 @@ class MoodMap(QGraphicsView):
             return
         if self._region_coarse is None:
             self._region_coarse = self._region_pixmap(fine=False)
-        if self._region_fine is None:
+        show_fine = self._user_zoom >= NEAR_PATCH_ZOOM and not self._zoom_active
+        if show_fine and self._region_fine is None:
             self._region_fine = self._region_pixmap(fine=True)
-        zoomed = self._user_zoom >= LIVE_STARS_ZOOM and not self._zoom_active
-        self._show_region_pixmap(self._region_fine if zoomed else self._region_coarse)
+        self._show_region_pixmap(
+            self._region_fine if show_fine and self._region_fine is not None else self._region_coarse
+        )
 
     def _night_star(self, item: RankedTrack, density: bool) -> tuple[float, QColor, int]:
         """Scene-pixel radius, quiet-sky color, and bloom alpha for one baked star."""

@@ -180,6 +180,7 @@ def test_lens_move_reuses_tiles_and_a_dive_uses_finer_ones(qapp) -> None:
     sky.set_tracks(tracks, None)
     coarse = sky._region_coarse
     assert coarse is not None and not coarse.isNull()
+    assert sky._region_fine is None
     sky.set_lens(0.2, 0.8, 0.12)
     assert sky._region_coarse is coarse
     sky._user_zoom = 2.6

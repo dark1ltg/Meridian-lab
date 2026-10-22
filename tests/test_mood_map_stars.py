@@ -856,8 +856,8 @@ def _patch_alpha(view: MoodMap, track_id: int) -> int:
     pos = view._positions[track_id]
     return _alpha_near(
         view._near.pixmap().toImage(),
-        (pos.x() - rect.x()) * NEAR_PATCH_SCALE,
-        (pos.y() - rect.y()) * NEAR_PATCH_SCALE,
+        (pos.x() - rect.x()) * view._detail_scale,
+        (pos.y() - rect.y()) * view._detail_scale,
         5,
     )
 
@@ -868,6 +868,8 @@ def test_wide_sky_stays_one_picture(qapp) -> None:
     _settle_zoom(view, 1.0)
     assert view._near.isVisible() is False
     assert view._field.opacity() == pytest.approx(1.0)
+    assert view._region_fine is None
+    assert view._region_shown is view._region_coarse
 
 
 def test_medium_zoom_draws_a_sharper_patch(qapp) -> None:
@@ -902,6 +904,29 @@ def test_medium_zoom_draws_a_sharper_patch(qapp) -> None:
     assert view._field.opacity() == pytest.approx(1.0)
     view._panning = False
     view._sync_near_patch()
+    assert view._near.isVisible()
+    assert view._detail_name == "mid"
+    assert view._detail_scale == NEAR_PATCH_SCALE
+    assert view._region_shown is view._region_fine
+
+
+def test_a_tighter_picture_replaces_the_mid_one(qapp) -> None:
+    view = MoodMap()
+    view.set_tracks(
+        [_ranked(_track(1, valence=0.5, energy=0.5, mood_confidence=0.9))],
+        None,
+    )
+    _settle_zoom(view, 2.3)
+    assert view._detail_name == "tight"
+    assert view._detail_scale > NEAR_PATCH_SCALE
+    assert view._near.isVisible()
+    assert view._field.opacity() == pytest.approx(0.0)
+    assert _patch_alpha(view, 1) > 20
+    tight = view._near.pixmap().cacheKey()
+    _settle_zoom(view, 1.8)
+    assert view._detail_name == "mid"
+    assert view._detail_scale == NEAR_PATCH_SCALE
+    assert view._near.pixmap().cacheKey() != tight
     assert view._near.isVisible()
 
 
