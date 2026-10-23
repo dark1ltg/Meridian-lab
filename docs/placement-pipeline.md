@@ -1,6 +1,6 @@
 # How stars get placed (placement)
 
-This guide explains, in plain language, how Meridian decides **where a song’s star sits** on the mood map.
+This guide explains, in plain language, how Meridian decides **where a song’s star sits** on the mood map. It matches lab `main` as of 2026-10-22.
 
 For how it takes the short listen, see [How Meridian listens](audio-analysis-pipeline.md).
 

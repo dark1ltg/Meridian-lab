@@ -1,6 +1,6 @@
 # How Meridian listens (audio analysis)
 
-This guide explains, in plain language, how Meridian takes a **short listen** of each track on your disk.  
+This guide explains, in plain language, how Meridian takes a **short listen** of each track on your disk. It matches lab `main` as of 2026-10-22.  
 It does not need the internet. It does not stream music.
 
 For how that listen turns into a star on the map, see [How stars get placed](placement-pipeline.md).
