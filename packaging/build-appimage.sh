@@ -146,7 +146,8 @@ cp "$ROOT/resources/metainfo/io.github.dark1ltg.Meridian.metainfo.xml" \
 sed -i "s/^X-AppImage-Version=.*/X-AppImage-Version=${APP_VERSION}/" \
   "$APPDIR/usr/share/applications/${APP}.desktop" \
   "$APPDIR/${APP}.desktop"
-TODAY="$(date -u +%Y-%m-%d)"
+# The published day is America/New_York, the day this image is built.
+TODAY="$(TZ=America/New_York date +%Y-%m-%d)"
 # Stamp only the newest <release> row — do not rewrite older release history.
 sed -i "0,/version=\"[0-9.]*\" date=\"[0-9-]*\"/s//version=\"${APP_VERSION}\" date=\"${TODAY}\"/" \
   "$APPDIR/usr/share/metainfo/io.github.dark1ltg.Meridian.metainfo.xml"

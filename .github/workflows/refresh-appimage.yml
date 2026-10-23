@@ -64,7 +64,7 @@ jobs:
           fi
           SHA=$(cut -d' ' -f1 "$SHA_FILE")
           COMMIT=${GITHUB_SHA}
-          NOTES="Meridian 1.3.6 — source archives + AppImage refreshed $(date -u +%Y-%m-%d). Version stays **1.3.6**.
+          NOTES="Meridian 1.3.6 — source archives + AppImage refreshed $(TZ=America/New_York date +%Y-%m-%d). Version stays **1.3.6**.
 
           ## What’s new (plain English)
           - **Bug fix (critical):** first-run analyze now starts after scan on newer Qt/PySide (the handoff was silently dropped before).

@@ -3,14 +3,23 @@ description: Update changelog, README, and guides in the same commit before push
 alwaysApply: true
 ---
 
-# Docs travel with every GitHub push
+# Docs and the publish date travel with every GitHub push
 
-Before `git push` of Meridian-lab changes, update the docs that the commit changes and include those edits in the same commit on `main`.
+Before `git push` of Meridian-lab code changes, update the docs and the published date in the same commit on `main`. The date is the calendar day the commit is pushed, in America/New_York. A later push on that same day keeps the date. A push on a new day moves every current published date together. Do not leave an older refresh date on the current release. Older version rows stay on the day they were published.
 
-- `CHANGELOG.md` — a plain-language bullet for each user-visible change. Do not move the published release date unless that GitHub release asset was actually replaced.
-- `README.md` — only if the short “what this is / how you use it” page would be wrong without the change.
+The AppImage build and the refresh workflow stamp that same America/New_York day. Do not stamp UTC.
+
+Set that day in all of these:
+
+- `CHANGELOG.md` — the current version’s “AppImage refreshed” date, the lab section date, a plain-language bullet for each user-visible change, and any packaging line that states when the current image was published.
+- `resources/metainfo/io.github.dark1ltg.Meridian.metainfo.xml` — the current `<release>` `date`.
+- `README.md`, `docs/README.md`, `POPULATE.md`, `docs/placement-pipeline.md`, and `docs/audio-analysis-pipeline.md` — the “as of” / “updated” date on each page.
+
+Also update the page body when the behavior changed:
+
+- `README.md` — when the short “what this is / how you use it” page would be wrong without the change.
 - `docs/audio-analysis-pipeline.md` and `docs/placement-pipeline.md` — when listen or placement behavior changed.
 - `docs/README.md` — when a guide’s promise changed.
-- `POPULATE.md` — when setup facts (what lab `main` contains, how to open it) changed.
+- `POPULATE.md` — when setup facts changed.
 
-Write the behavior the code has now. Skip docs that the change does not touch. Push only after those updates are committed.
+Write the behavior the code has now. Push only after those updates are committed.
