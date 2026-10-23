@@ -4,7 +4,7 @@
 
 ## 1. File tree
 
-Lab `main` started from `dark1ltg/Meridian` at `b48f89d` and has moved on (night-sky experiments, a more honest short listen, the slide and search-line, and a sharper patch that looks up only the songs in view). A pinch that starts up close keeps the stars on screen, and packed stars draw dimmer. History was not mirrored; lab commits stay on `main`. See [CHANGELOG.md](CHANGELOG.md).
+Lab `main` was updated 2026-10-22. It started from `dark1ltg/Meridian` at `b48f89d` and has moved on (night-sky experiments, a more honest short listen, the slide and search-line, and a sharper patch that looks up only the songs in view). A pinch that starts up close keeps the stars on screen, and packed stars draw dimmer. History was not mirrored; lab commits stay on `main`. See [CHANGELOG.md](CHANGELOG.md).
 
 To replace this repo with a full history mirror later, from a machine logged in as **dark1ltg**:
 
