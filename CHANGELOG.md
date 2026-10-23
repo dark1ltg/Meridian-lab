@@ -45,7 +45,7 @@ Version stays **1.3.6**. This refresh makes the short listen more honest and the
 
 ### Lab, published 2026-10-22
 
-These are on lab `main`. The local lab AppImage under `dist/` was rebuilt from that tree on 2026-10-22 at 9:31 PM ET.
+These are on lab `main`. The local lab AppImage under `dist/` was rebuilt from that tree on 2026-10-22 at 9:47 PM ET.
 
 - A beat that does not land on the heard hits is refused. A fast song whose tracker locked to half speed is checked against a double-time grid before that refusal. A refused pulse does not push Kinetic and does not take the BPM bonus. A tag BPM can still set the pace.
 - A mostly spoken window is remembered and can dim confidence. A borderline musical frame is not treated as speech. Quiet but even hits are not called faint. A melody that moves an octave can still count as one held tone.
