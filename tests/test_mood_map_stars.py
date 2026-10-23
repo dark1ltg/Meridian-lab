@@ -13,7 +13,7 @@ os.environ.setdefault("MERIDIAN_NO_GL", "1")
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtWidgets import QApplication, QGraphicsEllipseItem, QGraphicsLineItem
 
@@ -985,3 +985,75 @@ def test_sliding_star_is_left_out_of_the_sharper_patch(qapp) -> None:
     assert view._listen_ease is not None
     assert _patch_alpha(view, 1) == 0
     assert _patch_alpha(view, 2) > 20
+
+
+def test_the_patch_asks_only_for_songs_that_touch_it(qapp) -> None:
+    view = MoodMap()
+    tracks = [_ranked(_track(1, valence=0.5, energy=0.5, mood_confidence=0.9))]
+    tracks.extend(
+        _ranked(_track(i, valence=0.02, energy=0.02, mood_confidence=0.9))
+        for i in range(2, 40)
+    )
+    view.set_tracks(tracks, None)
+    seen: list[int] = []
+    real = view._paint_baked_star
+
+    def wrapped(painter, item, pos, density) -> None:
+        seen.append(item.track.id)
+        real(painter, item, pos, density)
+
+    view._paint_baked_star = wrapped
+    image = QImage(80, 80, QImage.Format.Format_ARGB32_Premultiplied)
+    painter = QPainter(image)
+    view._paint_star_layer(painter, QRectF(380, 270, 50, 50))
+    painter.end()
+    assert seen == [1]
+
+
+def test_a_pin_or_a_new_song_does_not_redraw_the_sky(qapp) -> None:
+    view = MoodMap()
+    song = _track(1, valence=0.5, energy=0.5, mood_confidence=0.9)
+    other = _track(2, valence=0.2, energy=0.3, mood_confidence=0.9)
+    view.set_tracks([_ranked(song), _ranked(other)], None)
+    rebuilds = {"n": 0}
+    real = view._rebuild_starfield
+
+    def wrapped() -> None:
+        rebuilds["n"] += 1
+        real()
+
+    view._rebuild_starfield = wrapped
+    before = view._field.pixmap().cacheKey()
+    song.pinned = True
+    view.set_tracks([_ranked(song), _ranked(other)], None)
+    assert rebuilds["n"] == 0
+    assert view._field.pixmap().cacheKey() != before
+    view.set_tracks([_ranked(song), _ranked(other)], 2)
+    assert rebuilds["n"] == 0
+    moved = _track(1, valence=0.8, energy=0.5, mood_confidence=0.9, pinned=True)
+    view.set_tracks([_ranked(moved), _ranked(other)], 2)
+    assert rebuilds["n"] == 1
+
+
+def _field_pixel(view: MoodMap, pos: QPointF) -> QColor:
+    image = view._field.pixmap().toImage()
+    return image.pixelColor(int(pos.x() * FIELD_SCALE), int(pos.y() * FIELD_SCALE))
+
+
+def test_a_pin_keeps_the_neighbor_glow(qapp) -> None:
+    view = MoodMap()
+    song = _track(1, valence=0.5, energy=0.5, mood_confidence=0.9)
+    # Forty pixels to the right. Its glow reaches back into the disc a pin clears.
+    neighbor = _track(2, valence=(440 - 40) / 720, energy=0.5, mood_confidence=0.9)
+    view.set_tracks([_ranked(song), _ranked(neighbor)], None)
+    pos = view._positions[2]
+    sample = QPointF(pos.x() - 10.0, pos.y())
+    before = _field_pixel(view, sample)
+    assert before.alpha() > 20
+    song.pinned = True
+    view.set_tracks([_ranked(song), _ranked(neighbor)], None)
+    after = _field_pixel(view, sample)
+    assert abs(after.alpha() - before.alpha()) <= 8
+    assert abs(after.red() - before.red()) <= 8
+    assert abs(after.green() - before.green()) <= 8
+    assert abs(after.blue() - before.blue()) <= 8

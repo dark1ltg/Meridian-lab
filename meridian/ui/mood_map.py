@@ -392,6 +392,10 @@ LIVE_STARS_ZOOM = 2.4
 NEAR_PATCH_ZOOM = 1.6
 NEAR_PATCH_SCALE = 4        # pixels per scene unit; the wide bake is FIELD_SCALE
 NEAR_PATCH_MARGIN = 0.35    # extra around the view so a short pan reuses the picture
+# Bloom and a pin sit a little outside the star. The patch asks for songs in this pad.
+PATCH_QUERY_PAD = 36.0
+# A pin or the song that starts playing updates those stars. More than this redraws the sky.
+APPEARANCE_STAMP_MAX = 8
 DETAIL_TIGHT_ZOOM = 2.2
 DETAIL_TIGHT_SCALE = 6
 LOD_LABEL_START = 2.6
@@ -1440,8 +1444,12 @@ class MoodMap(QGraphicsView):
         self._refresh_crowd()
         sig = self._field_signature()
         if sig != self._field_sig:
+            touched = self._appearance_only(self._field_sig, sig)
             self._field_sig = sig
-            self._rebuild_starfield()
+            if touched is None:
+                self._rebuild_starfield()
+            else:
+                self._restamp_appearance(touched)
         self._refresh_lens_colors()
         self._refresh_route()
         self._lod_band = -1
@@ -1959,7 +1967,121 @@ class MoodMap(QGraphicsView):
                 locked.add(tid)
         return locked
 
-    def _baked_star_order(self) -> list[RankedTrack]:
+    def _ids_in_rect(self, rect: QRectF) -> list[int]:
+        """Songs whose place falls in ``rect``. The click grid, not a walk of the library."""
+        if not self._star_grid and self._positions:
+            self._rebuild_star_grid()
+        cell = CLUSTER_GRID
+        if cell <= 0.0 or rect.isEmpty():
+            return []
+        gx0 = int(rect.left() // cell)
+        gx1 = int(rect.right() // cell)
+        gy0 = int(rect.top() // cell)
+        gy1 = int(rect.bottom() // cell)
+        found: list[int] = []
+        for gx in range(gx0, gx1 + 1):
+            for gy in range(gy0, gy1 + 1):
+                for tid, pos in self._star_grid.get((gx, gy), ()):
+                    if rect.contains(pos):
+                        found.append(tid)
+        return found
+
+    def _appearance_only(self, old: object | None, new: object) -> list[int] | None:
+        """Stars whose look changed while every song stayed put.
+
+        None means the sky itself changed: a song moved, the day changed, or
+        too many stars changed to retouch by hand.
+        """
+        if not isinstance(old, tuple) or not isinstance(new, tuple) or len(old) != 4 or len(new) != 4:
+            return None
+        if old[1] != new[1] or old[2] != new[2]:
+            return None
+        old_parts = {part[0]: part for part in old[3]}
+        new_parts = {part[0]: part for part in new[3]}
+        if old_parts.keys() != new_parts.keys():
+            return None
+        changed: list[int] = []
+        for tid, part in new_parts.items():
+            previous = old_parts[tid]
+            if previous[1] != part[1] or previous[2] != part[2]:
+                return None
+            if previous != part:
+                changed.append(tid)
+        if old[0] != new[0]:
+            for tid in (old[0], new[0]):
+                if tid is not None and tid not in changed:
+                    changed.append(int(tid))
+        if len(changed) > APPEARANCE_STAMP_MAX:
+            return None
+        return changed
+
+    def _restamp_appearance(self, ids: list[int]) -> None:
+        """Repaint a few stars that stayed put. A pin or a new song does not redraw the sky."""
+        pix = self._field.pixmap()
+        if pix.isNull() or not ids:
+            if ids:
+                self._rebuild_starfield()
+            return
+        density = len(self._ranked) > 1200
+        centers = [self._positions[tid] for tid in ids if tid in self._positions]
+        if not centers:
+            return
+        xs = [pos.x() for pos in centers]
+        ys = [pos.y() for pos in centers]
+        # The cleared disc is one star's glow. A neighbor that far away, plus its
+        # own glow, can still reach into the disc, so the lookup is twice as wide.
+        reach = PATCH_QUERY_PAD * 2.0
+        rect = QRectF(min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+        rect = rect.adjusted(-reach, -reach, reach, reach)
+        nearby = [
+            self._ranked[tid]
+            for tid in self._ids_in_rect(rect)
+            if tid in self._ranked
+        ]
+        order = self._baked_star_order(nearby)
+        image = pix.toImage()
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.scale(FIELD_SCALE, FIELD_SCALE)
+        painter.setPen(Qt.PenStyle.NoPen)
+        hole = QPainterPath()
+        for pos in centers:
+            hole.addEllipse(pos, PATCH_QUERY_PAD, PATCH_QUERY_PAD)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+        painter.fillPath(hole, QColor(0, 0, 0, 0))
+        # Redraw only inside the hole, so a neighbor's glow is not painted twice.
+        painter.setClipPath(hole)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+        if density and order:
+            cell = 10.0
+            counts: dict[tuple[int, int], int] = {}
+            for item in order:
+                pos = self._model_pos(item.track.id)
+                key = (int(pos.x() // cell), int(pos.y() // cell))
+                counts[key] = counts.get(key, 0) + 1
+            for (cx, cy), count in counts.items():
+                if count < 3:
+                    continue
+                center = QPointF(cx * cell + cell * 0.5, cy * cell + cell * 0.5)
+                alpha = min(72, 12 + int(14 * log2(count)))
+                painter.setBrush(QBrush(QColor(176, 156, 220, alpha)))
+                radius = 4.0 + min(10.0, count * 0.05)
+                painter.drawEllipse(center, radius, radius)
+        easing_id = self._listen_ease[0] if self._listen_ease is not None else None
+        painter.setPen(Qt.PenStyle.NoPen)
+        for item in order:
+            if item.track.id == easing_id:
+                continue
+            pos = self._positions.get(item.track.id)
+            if pos is None:
+                continue
+            self._paint_baked_star(painter, item, pos, density)
+        painter.end()
+        self._field.setPixmap(QPixmap.fromImage(image))
+        # The sharper picture is of this same sky. It redraws from the grid.
+        self._near_sig = None
+
+    def _baked_star_order(self, items: list[RankedTrack] | None = None) -> list[RankedTrack]:
         """Dim stars first, so a trusted one reads on top."""
 
         def _conf_band(item: RankedTrack) -> int:
@@ -1972,8 +2094,9 @@ class MoodMap(QGraphicsView):
                 return 1
             return 0
 
+        source = self._ranked.values() if items is None else items
         return sorted(
-            self._ranked.values(),
+            source,
             key=lambda item: (
                 _conf_band(item),
                 STAR_Z[item.quadrant] + (2 if item.track.loved else 0),
@@ -1982,7 +2105,13 @@ class MoodMap(QGraphicsView):
 
     def _paint_star_layer(self, painter: QPainter, clip: QRectF | None) -> None:
         """Quiet stars in scene coordinates. ``clip`` limits the work to one patch."""
-        order = self._baked_star_order()
+        if clip is None:
+            order = self._baked_star_order()
+        else:
+            reach = clip.adjusted(-PATCH_QUERY_PAD, -PATCH_QUERY_PAD, PATCH_QUERY_PAD, PATCH_QUERY_PAD)
+            order = self._baked_star_order(
+                [self._ranked[tid] for tid in self._ids_in_rect(reach) if tid in self._ranked]
+            )
         density_mode = len(self._ranked) > 1200
         reach = None if clip is None else clip.adjusted(-28.0, -28.0, 28.0, 28.0)
         if density_mode and order:
