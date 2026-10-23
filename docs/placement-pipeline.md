@@ -68,7 +68,8 @@ Meridian stores a confidence note (tag? path? listen? conflict?).
 Low confidence means “take this with a grain of salt” in the UI — it doesn’t invent a third map axis.  
 A confidence of exactly zero draws as a weak pewter star. If the number is missing, the star uses the neutral middle. Those two are not the same.  
 Focus / NOW ranking gives a **light** lift to higher-confidence listens over dim scrapes at similar distance — not enough to bury a clearly closer neighbor.  
-Full multi-window listens **steer** the queue more; seed-only / intro-only listens stay out of NOW unless the neighborhood has nothing better (pins and loved tracks still qualify). Shape/timbre leftovers gently bias Dim / Charge / Focus — still the same two map axes.
+When the start, middle, and end of a long song land close together, that star looks a little more sure. The lift stays inside the band it was already in, so it does not by itself flip a dim star to bright or a middle star to white. A build, a drop, or a song that is loud at both ends stays without that bonus.  
+An unsure star stays out of NOW unless the neighborhood has nothing better, or the song is pinned or loved. A middle or white star can still lead, and distance from the lens still decides. A full listen does not outrank that rule. Shape/timbre leftovers gently bias Dim / Charge / Focus — still the same two map axes.
 
 ### 6. Save (pins stay put)
 
@@ -81,11 +82,9 @@ If you dragged and **pinned** a star, analyze will not overwrite that pin.
 
 Without listening again:
 
-- Soft pull toward album/artist neighbors (unpinned only)  
-- Unstick clones that stacked on the same spot  
-- Spread the sky a bit relative to *your* collection  
-
-Rough / partial listens (seed-only, intro-only, end-only) can get nudged toward album mates, but tidy keeps them in the **unsure** confidence band so they still look dim.  
+- A shaky song that sits far from a tight album looks a little less sure, and the queue treats it as unsure. The star stays where the listen put it. A steady song stays bright and stays put, including a ballad on a dance album. A pin is left alone. A scattered album, such as a compilation, dims nobody. The same song is not dimmed twice.  
+- Other songs by the same artist do not pull it. Songs that share a dot stay stacked.  
+- The sky can still be spread a little relative to *your* collection, and stored brightness and flux can still finish a spot. Those passes are not a neighbor drag.  
 
 ### Partial listens and “seed only”
 

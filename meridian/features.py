@@ -261,6 +261,10 @@ CONTAINER_SEED_KEYS = frozenset(
 # Graduated confidence bands (UI + low_trust compat).
 CONFIDENCE_LOW = 0.45
 CONFIDENCE_HIGH = 0.75
+# Small lift when intro, mid, and late land close. It cannot cross a band line.
+AGREEMENT_LIFT = 0.03
+# Queue NOW rejects steer under 0.20. Unsure confidence stays under that line.
+UNSURE_STEER_MAX = 0.19
 
 
 def read_mood_confidence(track: object) -> float:
@@ -1270,6 +1274,19 @@ def shape_note_from_roles(role_profiles: dict[str, object]) -> str | None:
     return "steady"
 
 
+def _cap_unsure_steer(steer: float, confidence: float | None) -> float:
+    """An unsure star stays under the queue's NOW line. Middle and white stay eligible."""
+    if confidence is None:
+        return float(steer)
+    try:
+        conf = float(confidence)
+    except (TypeError, ValueError):
+        return float(steer)
+    if not np.isfinite(conf) or conf >= CONFIDENCE_LOW:
+        return float(steer)
+    return float(min(float(steer), UNSURE_STEER_MAX))
+
+
 def steer_weight_from_listen(
     *,
     pcm_ok: bool,
@@ -1279,29 +1296,30 @@ def steer_weight_from_listen(
     edge_salvage: str | None,
     seed_evidence: bool,
     variation: float = 0.0,
+    confidence: float | None = None,
 ) -> float:
     """How safe this placement is to steer the queue (0 ≈ seed/intro-only)."""
     if not pcm_ok:
-        return 0.05 if seed_evidence else 0.0
-    if edge_salvage == "intro":
-        return 0.05
-    if edge_salvage in ("late", "ends"):
-        return 0.22
-    if edge_salvage == "mid":
-        return 0.35
-    if multi_window and not pcm_unstable and variation < 0.28:
+        steer = 0.05 if seed_evidence else 0.0
+    elif edge_salvage == "intro":
+        steer = 0.05
+    elif edge_salvage in ("late", "ends"):
+        steer = 0.22
+    elif edge_salvage == "mid":
+        steer = 0.35
+    elif multi_window and not pcm_unstable and variation < 0.28:
         steer = 0.95
     elif multi_window:
         steer = 0.78
     elif pcm_fallback or pcm_unstable:
-        return 0.32
+        steer = 0.32
     else:
-        return 0.70
+        steer = 0.70
     # Partial multi-window (missing a section) still takes the fallback tax on
     # confidence — keep steer from looking fully safe.
-    if pcm_fallback:
+    if pcm_fallback and multi_window:
         steer = min(steer, 0.70)
-    return float(steer)
+    return _cap_unsure_steer(steer, confidence)
 
 
 def _profile_stability(p) -> float:
@@ -1770,11 +1788,92 @@ def _weighted_profile_blend(items: list[tuple[object, float]]):
     )
 
 
+def _three_tastes_agree(role_profiles: dict[str, object]) -> bool:
+    """True when intro, mid, and late sit close on both axes.
+
+    A build, drop, or bookend is not agreement. A clear fight that never
+    earns one of those names is not agreement either.
+    """
+    needed = ("intro", "mid", "late")
+    if any(role not in role_profiles for role in needed):
+        return False
+
+    def _axis(role: str) -> tuple[float, float]:
+        profile = role_profiles[role]
+        valence = float(getattr(profile, "valence", 0.5) or 0.5)
+        energy = float(getattr(profile, "energy", 0.5) or 0.5)
+        if not np.isfinite(valence):
+            valence = 0.5
+        if not np.isfinite(energy):
+            energy = 0.5
+        return valence, energy
+
+    points = [_axis(role) for role in needed]
+    max_disagree = 0.0
+    for i, (va, ea) in enumerate(points):
+        for vb, eb in points[i + 1 :]:
+            max_disagree = max(max_disagree, float(np.hypot(va - vb, ea - eb)))
+    span = max(point[1] for point in points) - min(point[1] for point in points)
+    return max_disagree < SHAPE_DISAGREE_CLEAR and span < SHAPE_ENERGY_SPAN_CLEAR
+
+
+def lift_confidence_inside_band(score: float, lift: float = AGREEMENT_LIFT) -> float:
+    """Add a little sureness without crossing the unsure line or the bright line."""
+    try:
+        value = float(score)
+    except (TypeError, ValueError):
+        return 0.0
+    if not np.isfinite(value):
+        return 0.0
+    value = float(np.clip(value, 0.0, 1.0))
+    if lift <= 0.0:
+        return value
+    if value < CONFIDENCE_LOW:
+        ceiling = CONFIDENCE_LOW - 0.01
+    elif value < CONFIDENCE_HIGH:
+        ceiling = CONFIDENCE_HIGH - 0.01
+    else:
+        ceiling = 1.0
+    return float(min(value + float(lift), max(value, ceiling)))
+
+
+def apply_taste_agreement(
+    confidence: float,
+    note: str,
+    *,
+    tastes_agree: bool,
+    multi_window: bool,
+    pcm_fallback: bool,
+    pcm_unstable: bool,
+    variation: float,
+    shape_note: str | None,
+) -> tuple[float, str]:
+    """Brighten a star a little when the three tastes agree. The spot stays put."""
+    if not tastes_agree or not multi_window or pcm_fallback or pcm_unstable:
+        return float(confidence), note
+    if shape_note != "steady":
+        return float(confidence), note
+    try:
+        spread = float(variation)
+    except (TypeError, ValueError):
+        spread = 1.0
+    if not np.isfinite(spread) or spread >= 0.28:
+        return float(confidence), note
+    lifted = lift_confidence_inside_band(confidence)
+    if lifted <= float(confidence) + 1e-6:
+        return float(confidence), note
+    text = (note or "").strip()
+    if "tastes agree" not in text:
+        text = f"{text} · tastes agree" if text else "tastes agree"
+    return lifted, text
+
+
 def _attach_shape(profile, role_profiles: dict[str, object]):
     """Stamp shape_note onto a merged profile from role-tagged windows."""
     note = shape_note_from_roles(role_profiles)
     try:
         profile.shape_note = note
+        profile.tastes_agree = _three_tastes_agree(role_profiles)
     except Exception:
         pass
     return profile
@@ -2745,6 +2844,16 @@ def analyze_audio(
     # Ends salvage is dual-edge and may carry a shape; everything else clears.
     if not multi_window and edge_salvage != "ends":
         shape_note = None
+    confidence, note = apply_taste_agreement(
+        confidence,
+        note,
+        tastes_agree=bool(getattr(profile, "tastes_agree", False)) if profile else False,
+        multi_window=multi_window,
+        pcm_fallback=pcm_fallback,
+        pcm_unstable=pcm_unstable,
+        variation=float(getattr(profile, "variation", 0.0) or 0.0) if profile else 0.0,
+        shape_note=shape_note,
+    )
     steer = steer_weight_from_listen(
         pcm_ok=pcm_ok,
         multi_window=multi_window,
@@ -2753,6 +2862,7 @@ def analyze_audio(
         edge_salvage=edge_salvage,
         seed_evidence=seed_evidence,
         variation=float(getattr(profile, "variation", 0.0) or 0.0) if profile else 0.0,
+        confidence=confidence,
     )
 
     return MoodResult(

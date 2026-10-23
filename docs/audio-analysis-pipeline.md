@@ -93,9 +93,9 @@ It stores the map position, a confidence note (“how sure are we” — multi-w
 
 When a batch of listens finishes, Meridian does light housekeeping with **no more audio decode**:
 
-- Nudge unpinned songs a little toward their album/artist neighbors  
-- Gently unstick songs that landed on top of each other  
-- Stretch positions so your collection uses the map more evenly  
+- If the start, middle, and end agreed, that star was already made a little more sure. Housekeeping does not move it for that.  
+- A shaky song far from a tight album becomes a little less sure. It is not pulled toward the album, and songs by the same artist do not pull it either. Songs on the same dot stay stacked.  
+- Stretch positions so your collection uses the map more evenly.  
 
 If you **pinned** a star, that pin stays. Analyze will not drag it.
 

@@ -395,7 +395,7 @@ class AnalyzeWorker(QObject):
 
 
 def run_library_tidy(library: Library) -> None:
-    """Album/artist smooth + acoustic spread + percentile rescale (no ffmpeg)."""
+    """Album outlier dim, then percentile rescale (no ffmpeg, no neighbor drag)."""
     library.smooth_album_moods()
     library.smooth_artist_moods()
     library.spread_album_acoustics()

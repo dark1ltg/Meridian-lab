@@ -91,9 +91,14 @@ def check_library_moods(db_path: Path) -> None:
         assert pinned.confidence_note == "pinned"
         assert not pinned.analyzed, "pin mtime refresh re-queues acoustics"
 
+        before_moods = {
+            t.id: (t.valence, t.energy, t.mood_confidence) for t in lib.all_tracks()
+        }
         n_smooth = lib.smooth_album_moods()
-        assert n_smooth >= 0
-        assert any("album smooth" in (t.confidence_note or "") for t in lib.all_tracks())
+        assert n_smooth == 0
+        for track in lib.all_tracks():
+            assert (track.valence, track.energy, track.mood_confidence) == before_moods[track.id]
+            assert "album smooth" not in (track.confidence_note or "")
 
         n_sc = lib.rescale_moods_by_percentile(min_group=8)
         assert abs(lib.get(1).valence - pin_v) < 1e-9, "pin moved by rescale"
@@ -1114,27 +1119,18 @@ def check_severity_6_8_guards(db_path: Path) -> None:
         high_before = lib.get(1)
         assert high_before is not None
         hv, he = high_before.valence, high_before.energy
+        spots = {t.id: (t.valence, t.energy) for t in lib.all_tracks()}
         n = lib.spread_album_acoustics()
-        assert n >= 1
+        assert n == 0
         high_after = lib.get(1)
         assert high_after is not None
         assert abs(high_after.valence - hv) < 1e-9
         assert abs(high_after.energy - he) < 1e-9
-        moved = [
-            t
-            for t in lib.all_tracks()
-            if t.path.startswith("/spread/")
-            and t.id != 1
-            and "album spread" in (t.confidence_note or "")
-        ]
-        assert moved, "low-confidence album mates should receive spread notes"
-        # Idempotent: second pass must not walk stars further.
+        for track in lib.all_tracks():
+            assert (track.valence, track.energy) == spots[track.id]
+            assert "album spread" not in (track.confidence_note or "")
         n2 = lib.spread_album_acoustics()
         assert n2 == 0
-        for t in moved:
-            after = lib.get(t.id)
-            assert after is not None
-            assert abs(after.valence - t.valence) < 1e-9
     finally:
         lib.close()
 

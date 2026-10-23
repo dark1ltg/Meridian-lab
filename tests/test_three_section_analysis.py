@@ -1074,3 +1074,88 @@ def test_partial_multi_window_caps_steer() -> None:
     assert full >= 0.9
     assert partial <= 0.70
     assert partial < full
+
+
+def test_three_tastes_that_agree_brighten_inside_the_band() -> None:
+    from meridian.features import (
+        CONFIDENCE_HIGH,
+        CONFIDENCE_LOW,
+        _merge_pcm_profiles,
+        apply_taste_agreement,
+        lift_confidence_inside_band,
+    )
+
+    close = _merge_pcm_profiles(
+        None,
+        role_profiles={
+            "intro": _prof(valence=0.50, energy=0.50),
+            "mid": _prof(valence=0.51, energy=0.51),
+            "late": _prof(valence=0.52, energy=0.52),
+        },
+    )
+    assert close.shape_note == "steady"
+    assert close.tastes_agree is True
+    lifted, note = apply_taste_agreement(
+        0.70,
+        "PCM",
+        tastes_agree=True,
+        multi_window=True,
+        pcm_fallback=False,
+        pcm_unstable=False,
+        variation=0.05,
+        shape_note="steady",
+    )
+    assert 0.70 < lifted < CONFIDENCE_HIGH
+    assert "tastes agree" in note
+    assert lift_confidence_inside_band(0.74) < CONFIDENCE_HIGH
+    assert lift_confidence_inside_band(0.44) < CONFIDENCE_LOW
+    assert lift_confidence_inside_band(0.80) > 0.80
+
+    drop = _merge_pcm_profiles(
+        None,
+        role_profiles={
+            "intro": _prof(valence=0.40, energy=0.30),
+            "mid": _prof(valence=0.50, energy=0.70),
+            "late": _prof(valence=0.50, energy=0.66),
+        },
+    )
+    assert drop.tastes_agree is False
+    stayed, stayed_note = apply_taste_agreement(
+        0.70,
+        "PCM",
+        tastes_agree=False,
+        multi_window=True,
+        pcm_fallback=False,
+        pcm_unstable=False,
+        variation=0.05,
+        shape_note=drop.shape_note,
+    )
+    assert stayed == 0.70
+    assert stayed_note == "PCM"
+
+
+def test_unsure_confidence_keeps_steer_under_the_now_gate() -> None:
+    from meridian.features import UNSURE_STEER_MAX, steer_weight_from_listen
+
+    unsure = steer_weight_from_listen(
+        pcm_ok=True,
+        multi_window=True,
+        pcm_fallback=False,
+        pcm_unstable=False,
+        edge_salvage=None,
+        seed_evidence=True,
+        variation=0.1,
+        confidence=0.40,
+    )
+    sure = steer_weight_from_listen(
+        pcm_ok=True,
+        multi_window=True,
+        pcm_fallback=False,
+        pcm_unstable=False,
+        edge_salvage=None,
+        seed_evidence=True,
+        variation=0.1,
+        confidence=0.80,
+    )
+    assert unsure <= UNSURE_STEER_MAX
+    assert sure >= 0.9
