@@ -1144,6 +1144,8 @@ class MoodMap(QGraphicsView):
         self._search_ids: set[int] = set()
         self._flare_sig: object | None = None
         self._zoom_held_live = False
+        self._pinch_stars_ready = False
+        self._pointer_bright_id: int | None = None
         self._playing = False
         self._tracks_shown = False
         self._life_prev: QRectF | None = None
@@ -1576,8 +1578,8 @@ class MoodMap(QGraphicsView):
             parts.append(
                 (
                     tid,
-                    round(pos.x(), 1),
-                    round(pos.y(), 1),
+                    round(pos.x(), 2),
+                    round(pos.y(), 2),
                     bool(item.track.pinned),
                     bool(item.track.loved),
                     tid == self._current_id,
@@ -2831,8 +2833,9 @@ class MoodMap(QGraphicsView):
         self._zoom_held_live = self._user_zoom >= LIVE_STARS_ZOOM and any(
             star.isVisible() for star in self._stars.values()
         )
+        self._pinch_stars_ready = self._zoom_held_live
         if self._zoom_held_live:
-            self.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+            # Keep the edges smooth. These stars stay on screen through the pinch.
             return
         self._show_wide_stars()
         # Farther out, the wide picture covers the pinch. Keep a pin that is mid-drag.
@@ -2853,16 +2856,41 @@ class MoodMap(QGraphicsView):
             return 0.0
         return 1.0 - (zoom - PILE_FADE_START) / (LIVE_STARS_ZOOM - PILE_FADE_START)
 
+    def _stars_take_input(self) -> bool:
+        """A drag can pin a star only once the close view has settled."""
+        return self._user_zoom >= LIVE_STARS_ZOOM and not self._zoom_active and not self._falling
+
     def _set_star_strength(self, strength: float) -> None:
         """Fade the clickable stars. A pin that is mid-drag stays on the sky."""
         locked = self._drag_locked_ids()
+        take = self._stars_take_input()
+        buttons = Qt.MouseButton.LeftButton if take else Qt.MouseButton.NoButton
         for tid, star in self._stars.items():
+            star.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, take)
+            star.setAcceptedMouseButtons(buttons)
+            star._label.setAcceptedMouseButtons(buttons)
+            star._role.setAcceptedMouseButtons(buttons)
             if strength <= 0.02 and tid not in locked:
                 star.hide()
                 continue
             base = getattr(star, "_trust_opacity", 1.0) or 1.0
             star.setOpacity(max(0.0, min(1.0, base * strength)))
             star.show()
+
+    def _nudge_live_star_scale(self, zoom: float) -> None:
+        """Resize the stars already on screen. A pinch does not rebuild them."""
+        body = 1.0 if zoom < LIVE_STARS_ZOOM else LIVE_STARS_ZOOM / max(zoom, LIVE_STARS_ZOOM)
+        for star in self._stars.values():
+            star.set_body_scale(body, hot=getattr(star, "_search_hot", False))
+
+    def _hold_pinch_stars(self, zoom: float) -> None:
+        """One build per pinch, then only the size changes."""
+        if not self._pinch_stars_ready:
+            self._place_live_stars(zoom)
+            self._pinch_stars_ready = True
+            self.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            return
+        self._nudge_live_star_scale(zoom)
 
     def _sky_has_a_picture(self) -> bool:
         if self._field.opacity() > 0.04:
@@ -2876,21 +2904,23 @@ class MoodMap(QGraphicsView):
         return any(star.isVisible() and star.opacity() > 0.04 for star in self._stars.values())
 
     def _fade_during_pinch(self) -> None:
-        """Opacity only. A pinch does not bake a new picture, and it does not go blank."""
+        """Opacity only. A pinch does not bake a new picture, and it does not go blank.
+
+        The lens pool and the queue path stay as they were. Stars shown on the way
+        through cannot be dragged.
+        """
         fade = self._pile_fade()
         if self._zoom_held_live:
-            self._place_live_stars(self._user_zoom)
+            self._hold_pinch_stars(self._user_zoom)
             strength = 1.0 if self._user_zoom >= LIVE_STARS_ZOOM else max(0.0, 1.0 - fade)
             self._set_star_strength(strength)
             self._hide_near_patch()
             if self._user_zoom >= LIVE_STARS_ZOOM:
                 self._field.setOpacity(0.0)
                 self._regions.setOpacity(0.0)
-                self._lens_color.setOpacity(0.0)
             else:
                 self._field.setOpacity(fade)
                 self._regions.setOpacity(fade)
-                self._lens_color.setOpacity(fade)
         elif fade >= 0.999:
             self._show_wide_stars()
             locked = self._drag_locked_ids()
@@ -2899,14 +2929,12 @@ class MoodMap(QGraphicsView):
                     star.hide()
             self._field.setOpacity(1.0)
             self._regions.setOpacity(1.0)
-            self._lens_color.setOpacity(1.0)
         else:
             self._show_wide_stars()
-            self._place_live_stars(self._user_zoom)
+            self._hold_pinch_stars(self._user_zoom)
             self._set_star_strength(1.0 - fade)
             self._field.setOpacity(fade)
             self._regions.setOpacity(fade)
-            self._lens_color.setOpacity(fade)
             self._hide_near_patch()
         if not self._sky_has_a_picture():
             self._field.setOpacity(1.0)
@@ -3086,19 +3114,47 @@ class MoodMap(QGraphicsView):
         index = ids.index(current) if current in ids else 0
         self._adopt_stack_focus(star, ids[(index + step) % len(ids)])
 
-    def _sync_pointer_stars(self) -> None:
-        if self._user_zoom < LIVE_STARS_ZOOM or self._falling or self._zoom_active:
+    def _crowd_under_pointer(self) -> int | None:
+        """The packed star under the pointer. A pin and the song playing stay bright anyway."""
+        if self._pointer_scene is None:
+            return None
+        tid = self._nearest_track_id(self._pointer_scene, CROWD_RADIUS)
+        if tid is None or tid not in self._crowd_ids or tid == self._current_id:
+            return None
+        item = self._ranked.get(tid)
+        if item is None or item.track.pinned:
+            return None
+        return tid
+
+    def _restamp_pointer_crowd(self) -> None:
+        """Brighten the packed star under the pointer on the picture already on screen."""
+        bright = self._crowd_under_pointer()
+        previous = self._pointer_bright_id
+        if bright == previous:
             return
-        self._lod_band = -1
-        self._sync_live_stars(force=True)
+        ids = [tid for tid in (previous, bright) if tid is not None]
+        self._pointer_bright_id = bright
+        if not ids:
+            return
+        self._restamp_appearance(ids)
+        if self._near.isVisible():
+            self._sync_near_patch()
+
+    def _sync_pointer_stars(self) -> None:
+        if self._falling or self._zoom_active:
+            return
+        if self._user_zoom >= LIVE_STARS_ZOOM:
+            self._lod_band = -1
+            self._sync_live_stars(force=True)
+            return
+        self._restamp_pointer_crowd()
 
     def _place_live_stars(self, zoom: float) -> None:
         """Clickable stars for this zoom. Does not decide which picture sits under them."""
-        self._route.setOpacity(0.85)
         self._ensure_regions()
         locked = self._drag_locked_ids()
         groups = self._close_groups(locked)
-        body = LIVE_STARS_ZOOM / max(zoom, LIVE_STARS_ZOOM)
+        body = 1.0 if zoom < LIVE_STARS_ZOOM else LIVE_STARS_ZOOM / max(zoom, LIVE_STARS_ZOOM)
         if zoom <= LOD_GLOW_START:
             glow_a = 0.0
         else:
@@ -3143,30 +3199,6 @@ class MoodMap(QGraphicsView):
             if self._stars[tid] not in used:
                 self._scene.removeItem(self._stars.pop(tid))
 
-    def _present_settled_pile(self, zoom: float) -> None:
-        """Wide sky, or the sharper patch, with the pile faded toward the clickable stars."""
-        pile = self._pile_fade(zoom)
-        self._apply_search_veil()
-        if self._search_query:
-            self._sync_near_patch()
-            return
-        if pile <= 0.0:
-            self._hide_close_smear()
-            self._sync_near_patch()
-            return
-        self._field.setOpacity(1.0)
-        self._regions.setOpacity(pile)
-        self._lens_color.setOpacity(pile)
-        self._route.setOpacity(1.0)
-        self._ensure_regions()
-        self._sync_near_patch()
-        if self._near.isVisible():
-            self._near.setOpacity(pile)
-            self._field.setOpacity(0.0)
-        else:
-            self._field.setOpacity(pile)
-        self._regions.setOpacity(pile)
-
     def _sync_live_stars(self, *, force: bool = False) -> None:
         """Sky = baked field only. Zoomed in = sparse live stars in the viewport."""
         if self._falling:
@@ -3184,7 +3216,7 @@ class MoodMap(QGraphicsView):
             self._apply_search_veil()
             return
 
-        if zoom < PILE_FADE_START:
+        if zoom < LIVE_STARS_ZOOM:
             locked = self._drag_locked_ids()
             for tid, star in self._stars.items():
                 if tid in locked:
@@ -3205,8 +3237,11 @@ class MoodMap(QGraphicsView):
             return
 
         self._place_live_stars(zoom)
-        self._set_star_strength(1.0 - self._pile_fade(zoom))
-        self._present_settled_pile(zoom)
+        self._set_star_strength(1.0)
+        self._route.setOpacity(0.85)
+        self._apply_search_veil()
+        self._hide_close_smear()
+        self._sync_near_patch()
 
     def _anchor_point(self, view_pos: QPoint | QPointF) -> QPoint:
         return view_pos.toPoint() if isinstance(view_pos, QPointF) else QPoint(view_pos)
@@ -3443,7 +3478,11 @@ class MoodMap(QGraphicsView):
             )
             self._hand_drag_armed = False
             super().mouseReleaseEvent(release)
-        self._sync_near_patch()
+        if self._user_zoom >= LIVE_STARS_ZOOM:
+            self._sync_near_patch()
+            return
+        self._lod_band = -1
+        self._sync_live_stars(force=True)
 
     def _begin_hand_pan(self, event) -> None:
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
@@ -3455,10 +3494,17 @@ class MoodMap(QGraphicsView):
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             item = self.itemAt(event.position().toPoint())
+            # Below the close view a painted star is not something you can drag away.
+            if self._track_star_from_item(item) is not None and not self._stars_take_input():
+                item = None
             if not self._is_interactive_item(item):
                 scene_pt = self.mapToScene(event.position().toPoint())
                 # Zoomed in: baked dots aren't live — materialize the nearest star.
+                # A pinch keeps those stars up, but a press during it must not pin one.
                 if self._user_zoom >= LIVE_STARS_ZOOM:
+                    if not self._stars_take_input():
+                        event.accept()
+                        return
                     tid = self._nearest_track_id(scene_pt, HIT_RADIUS_SKY)
                     if tid is not None and tid in self._ranked:
                         star = self._ensure_interactive_star(tid)

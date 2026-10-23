@@ -13,9 +13,14 @@ os.environ.setdefault("MERIDIAN_NO_GL", "1")
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QImage, QPainter
-from PySide6.QtWidgets import QApplication, QGraphicsEllipseItem, QGraphicsLineItem
+from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter
+from PySide6.QtWidgets import (
+    QApplication,
+    QGraphicsEllipseItem,
+    QGraphicsItem,
+    QGraphicsLineItem,
+)
 
 from meridian.library import Track
 from meridian.queue_engine import Quadrant, RankedTrack
@@ -424,6 +429,16 @@ def test_the_same_search_keeps_its_glow(qapp) -> None:
     moved = _track(1, title="Alpha", valence=0.8, energy=0.4)
     view.set_tracks([_ranked(moved), _ranked(other)], None)
     assert paints["n"] == 1
+    # A hair of a move still moves the glow. A tenth of a pixel used to be ignored.
+    home = view._positions[1]
+    nudged = _track(
+        1,
+        title="Alpha",
+        valence=(home.x() + 0.05 - 40) / 720,
+        energy=(560 - home.y()) / 524,
+    )
+    view.set_tracks([_ranked(nudged), _ranked(other)], None)
+    assert paints["n"] == 2
 
 
 def test_filename_search_flares_the_song(qapp) -> None:
@@ -484,22 +499,58 @@ def test_a_pinch_from_close_keeps_the_stars(qapp) -> None:
     assert any(star.isVisible() and star.opacity() > 0.2 for star in view._stars.values())
     assert view._field.opacity() == pytest.approx(0.0)
     view._user_zoom = 2.2
+    lens = view._lens_color.opacity()
+    route = view._route.opacity()
+    builds = {"n": 0}
+    real = view._place_live_stars
+
+    def wrapped(zoom: float) -> None:
+        builds["n"] += 1
+        real(zoom)
+
+    view._place_live_stars = wrapped
     view._fade_during_pinch()
+    view._fade_during_pinch()
+    assert builds["n"] == 0
     assert view._field.opacity() == pytest.approx(view._pile_fade(2.2), abs=0.02)
-    assert any(star.isVisible() and star.opacity() > 0.2 for star in view._stars.values())
+    assert view._lens_color.opacity() == pytest.approx(lens)
+    assert view._route.opacity() == pytest.approx(route)
+    visible = [star for star in view._stars.values() if star.isVisible()]
+    assert visible
+    assert visible[0].opacity() > 0.2
+    assert not visible[0].flags() & QGraphicsItem.GraphicsItemFlag.ItemIsMovable
+    assert view.renderHints() & QPainter.RenderHint.Antialiasing
 
 
-def test_the_pile_fades_before_the_close_view(qapp) -> None:
+def test_letting_go_before_close_is_one_picture(qapp) -> None:
     view = MoodMap()
     view.resize(800, 600)
     view.set_tracks([_ranked(_track(1, valence=0.5, energy=0.5))], None)
     _settle_zoom(view, 2.2)
     assert view._near.isVisible()
-    assert view._near.opacity() == pytest.approx(0.5, abs=0.02)
+    assert view._near.opacity() == pytest.approx(1.0)
     assert view._field.opacity() == pytest.approx(0.0)
-    visible = [star for star in view._stars.values() if star.isVisible()]
-    assert visible
-    assert visible[0].opacity() == pytest.approx(0.5, abs=0.08)
+    assert view._lens_color.opacity() == pytest.approx(1.0)
+    assert view._route.opacity() == pytest.approx(1.0)
+    assert not any(star.isVisible() for star in view._stars.values())
+    view._place_live_stars(2.2)
+    view._set_star_strength(0.5)
+    view._show_wide_stars()
+    view._panning = True
+    view._hand_drag_armed = False
+    view._finish_hand_drag(
+        QMouseEvent(
+            QEvent.Type.MouseButtonRelease,
+            QPointF(12, 12),
+            QPointF(12, 12),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+    )
+    assert view._near.isVisible()
+    assert view._near.opacity() == pytest.approx(1.0)
+    assert not any(star.isVisible() for star in view._stars.values())
 
 
 def test_close_view_keeps_small_stars_and_hides_the_pile(qapp) -> None:
@@ -624,6 +675,38 @@ def test_a_crowd_drops_its_halo(qapp) -> None:
     view._lod_band = -1
     view._sync_live_stars(force=True)
     assert view._stars[bright]._glow.isVisible()
+
+
+def test_the_pointer_brightens_a_packed_star_on_the_wide_sky(qapp) -> None:
+    view = MoodMap()
+    view.resize(640, 480)
+    tracks = []
+    for n in range(8):
+        x = 400 + (n % 3) * 6
+        y = 300 + (n // 3) * 6
+        tracks.append(
+            _ranked(
+                _track(
+                    10 + n,
+                    valence=(x - 40) / 720,
+                    energy=(560 - y) / 524,
+                    mood_confidence=0.95,
+                )
+            )
+        )
+    view.set_tracks(tracks, None)
+    view._user_zoom = 1.0
+    packed = 10
+    assert packed in view._crowd_ids
+    pos = view._positions[packed]
+    before = _field_pixel(view, pos).alpha()
+    view._pointer_scene = QPointF(pos)
+    view._sync_pointer_stars()
+    after = _field_pixel(view, pos).alpha()
+    assert after > before + 40
+    view._pointer_scene = view.mood_to_pos(0.9, 0.1)
+    view._sync_pointer_stars()
+    assert _field_pixel(view, pos).alpha() < after - 20
 
 
 def test_closer_lines_gather_a_shape_and_a_long_line_does_not() -> None:
