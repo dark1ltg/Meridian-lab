@@ -12,7 +12,7 @@ Version stays **1.3.6**. This refresh makes the short listen more honest and the
 - Loudness is normalized before Kinetic/Glow cues so a hot master doesn’t look “more energetic” just because it’s louder.
 - Silent game-cue intros shift the listen onto the first audible stretch instead of tasting only hush.
 - Multi-window listens can store a simple **shape** note (steady / build / drop / bookend) and a **timbre** hint (tonal vs noisy) for the queue — still the same two map axes.
-- Full listens steer the queue more; seed-only / intro-only listens stay out of NOW unless nothing better is nearby (or the track is pinned / loved).
+- A sure listen can steer the queue. An unsure listen stays out of NOW unless nothing better is nearby, or the song is pinned or loved. Seed-only and intro-only listens stay in that unsure group.
 
 **More honest placement**
 - Spoken non-musical frames are dropped when real music remains in the listen.
@@ -45,7 +45,7 @@ Version stays **1.3.6**. This refresh makes the short listen more honest and the
 
 ### Lab, published 2026-10-22
 
-These are on lab `main`. The local lab AppImage under `dist/` was rebuilt from that tree on 2026-10-22 at 10:33 PM ET. The date stamped on that image is that same Eastern Time day.
+These are on lab `main`. The local lab AppImage under `dist/` was rebuilt from that tree on 2026-10-22 at 10:36 PM ET. The date stamped on that image is that same Eastern Time day.
 
 - A beat that does not land on the heard hits is refused. A fast song whose tracker locked to half speed is checked against a double-time grid before that refusal. A refused pulse does not push Kinetic and does not take the BPM bonus. A tag BPM can still set the pace.
 - A mostly spoken window is remembered and can dim confidence. A borderline musical frame is not treated as speech. Quiet but even hits are not called faint. A melody that moves an octave can still count as one held tone.
@@ -148,8 +148,8 @@ Richer acoustic mood cues from the existing PCM decode budget, smarter local rec
 - Tag vs path genre conflict reduces metadata authority; freed weight goes to PCM only in proportion to PCM trust (not maxed)
 - Structure-aware soft/genre clamps: steady rhythm + genre disagreement trusts PCM more; unstable material hugs the seed
 - When tag and detected BPM conflict, energy nudge trusts detected if rhythm is steady, otherwise the tag
-- Persists onset consistency, spectral flux, and brightness for Focus ranking and album spread (no re-decode)
-- After album smooth, within-album acoustic spread unsticks clones using those cues (pins untouched; default max shift ~0.07)
+- Persists onset consistency, spectral flux, and brightness for Focus ranking (no re-decode)
+- 1.3.5 nudged rough songs toward an album and eased copies off the same dot. Lab main, published 2026-10-22, leaves those dots put. A shaky song far from a tight album only looks less sure.
 - Expanded local genre seeds (phonk, hyperpop, drill, vaporwave, amapiano, city pop, and related aliases)
 - Pins, metadata, and total decode budget unchanged
 

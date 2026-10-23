@@ -365,7 +365,7 @@ class MoodResult:
     confidence: float
     low_trust: bool
     confidence_note: str = ""
-    # Optional acoustic cues persisted for ranking / album spread (no re-decode).
+    # Optional acoustic cues persisted for ranking and later tidy (no re-decode).
     onset_consistency: float | None = None
     acoustic_flux: float | None = None
     brightness: float | None = None
@@ -1655,7 +1655,7 @@ def _merge_two_pcm_profiles(primary, secondary):
         unstable = bool(winner.unstable)
         ostats_src = winner
         if loser_more_active:
-            # Persist the active window's motion cues for Focus / album spread.
+            # Persist the active window's motion cues for Focus and later tidy.
             ostats_src = loser if float(loser.onset_rate) >= float(winner.onset_rate) else winner
         tonal = _avg_tonal([winner, loser], [1.0 - inj_v, inj_v])
         timbre_source = _pick_timbre_source([winner, loser], [1.0 - inj_v, inj_v])

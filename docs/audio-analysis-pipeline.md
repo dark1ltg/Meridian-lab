@@ -85,7 +85,7 @@ Simple rules of thumb Meridian tries to follow:
 
 ### 5. Save the result
 
-It stores the map position, a confidence note (“how sure are we” — multi-window listens say so), shape/timbre/steer leftovers when known, and a few other clues (brightness, flux, steady rhythm, speech share, whether the pulse was refused) for later tidy-ups — **without** listening again. A stored confidence of exactly zero stays rock-bottom. A missing confidence is the neutral middle, not the same thing as zero.
+It stores the map position, a confidence note (“how sure are we” — three tastes that agree say so), shape/timbre/steer leftovers when known, and a few other clues (brightness, flux, steady rhythm, speech share, whether the pulse was refused) for later tidy-ups — **without** listening again. A stored confidence of exactly zero stays rock-bottom. A missing confidence is the neutral middle, not the same thing as zero.
 
 **Rescan / mtime refresh:** when Meridian clears the “analyzed” flag so a track will be listened to again, it still **keeps the existing PCM mood coords** if leftover brightness/flux clues remain — so Rescan does not flash stars back to genre seeds until a new successful decode lands. Section blend weights are deterministic (no random jitter on merge).
 
