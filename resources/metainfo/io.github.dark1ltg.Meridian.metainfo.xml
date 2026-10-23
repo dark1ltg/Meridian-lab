@@ -43,14 +43,14 @@
   </keywords>
   <content_rating type="oars-1.1" />
   <releases>
-    <release version="1.3.6" date="2026-10-18">
+    <release version="1.3.6" date="2026-10-22">
       <description>
         <p>
-          AppImage refresh (still 1.3.6): louder-normalized short listens,
-          audible-span windows, shape/timbre/steer for the queue, placement
-          honesty cues (dialogue drop, tonal×onset blend, pitch Glow, pulse
-          Kinetic, keyword undo, sub-bass Shadow), kept-prior mass re-queue
-          bug fix, plus earlier path-to-9 blend and dual-worker analyze.
+          AppImage refresh (still 1.3.6), published 2026-10-22: the lab sky
+          (sharper patch, pinch, packed stars), on top of louder-normalized
+          short listens, audible-span windows, shape/timbre/steer for the
+          queue, placement honesty cues, the kept-prior mass re-queue bug fix,
+          plus earlier path-to-9 blend and dual-worker analyze.
         </p>
       </description>
     </release>
