@@ -15,7 +15,7 @@ When that neighborhood feels right, press **Renew**. That commits the queue.
 
 A finish or a skip slides that unpinned star a short way, and leaves a faint mark where it was. Search draws a brief line from the lens to the song you picked, then the line fades. A weak guess, including a confidence of zero, stays a dim star.
 
-Zoom in a little and, once the pinch stops, the patch you are looking at is drawn sharper, from the songs in that patch. A bit closer, that picture is replaced by a tighter one. The wide sky stays one picture. Neighborhood lines get finer there. In close, the stars you can click take over. Pinning a song, or the next song starting, updates that one star.
+Zoom in a little and, once the pinch stops, the patch you are looking at is drawn sharper, from the songs in that patch. A bit closer, that picture is replaced by a tighter one. The wide sky stays one picture. Neighborhood lines get finer there. In close, the stars you can click take over. A pinch that starts up close keeps those stars on the sky, and the pile fades as they take over. Pinning a song, or the next song starting, updates that one star. Stars packed together draw dimmer. The song playing, a pin, and the star under the pointer stay bright.
 
 ![A look at the sky](docs/screenshots/01-overview.png)
 

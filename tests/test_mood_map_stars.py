@@ -402,6 +402,30 @@ def test_search_blacks_out_the_sky_and_keeps_the_match(qapp) -> None:
     assert view._flare.pixmap().isNull()
 
 
+def test_the_same_search_keeps_its_glow(qapp) -> None:
+    view = MoodMap()
+    view.resize(480, 360)
+    song = _track(1, title="Alpha", valence=0.3, energy=0.4)
+    other = _track(2, title="Other", valence=0.7, energy=0.6)
+    view.set_tracks([_ranked(song), _ranked(other)], None)
+    view.set_search_query("alpha")
+    key = view._flare.pixmap().cacheKey()
+    paints = {"n": 0}
+    real = view._flare.setPixmap
+
+    def wrapped(pix) -> None:
+        paints["n"] += 1
+        real(pix)
+
+    view._flare.setPixmap = wrapped
+    view.set_tracks([_ranked(song), _ranked(other)], None)
+    assert paints["n"] == 0
+    assert view._flare.pixmap().cacheKey() == key
+    moved = _track(1, title="Alpha", valence=0.8, energy=0.4)
+    view.set_tracks([_ranked(moved), _ranked(other)], None)
+    assert paints["n"] == 1
+
+
 def test_filename_search_flares_the_song(qapp) -> None:
     view = MoodMap()
     view.resize(480, 360)
@@ -446,6 +470,36 @@ def test_playing_a_star_starts_a_ripple(qapp) -> None:
     view.set_tracks(ranked, 1)
     assert view._ripple_origin is not None
     assert view._ripple_neighbors
+
+
+def test_a_pinch_from_close_keeps_the_stars(qapp) -> None:
+    view = MoodMap()
+    view.resize(480, 360)
+    view.set_tracks([_ranked(_track(1, valence=0.4, energy=0.5))], None)
+    view._user_zoom = 6.0
+    view._lod_band = -1
+    view._sync_live_stars(force=True)
+    assert view._field.opacity() == pytest.approx(0.0)
+    view._begin_zoom_interaction()
+    assert any(star.isVisible() and star.opacity() > 0.2 for star in view._stars.values())
+    assert view._field.opacity() == pytest.approx(0.0)
+    view._user_zoom = 2.2
+    view._fade_during_pinch()
+    assert view._field.opacity() == pytest.approx(view._pile_fade(2.2), abs=0.02)
+    assert any(star.isVisible() and star.opacity() > 0.2 for star in view._stars.values())
+
+
+def test_the_pile_fades_before_the_close_view(qapp) -> None:
+    view = MoodMap()
+    view.resize(800, 600)
+    view.set_tracks([_ranked(_track(1, valence=0.5, energy=0.5))], None)
+    _settle_zoom(view, 2.2)
+    assert view._near.isVisible()
+    assert view._near.opacity() == pytest.approx(0.5, abs=0.02)
+    assert view._field.opacity() == pytest.approx(0.0)
+    visible = [star for star in view._stars.values() if star.isVisible()]
+    assert visible
+    assert visible[0].opacity() == pytest.approx(0.5, abs=0.08)
 
 
 def test_close_view_keeps_small_stars_and_hides_the_pile(qapp) -> None:
@@ -550,6 +604,11 @@ def test_a_crowd_drops_its_halo(qapp) -> None:
     assert view._night_star(view._ranked[3], False)[2] > 0
     assert view._night_star(view._ranked[4], False)[2] > 0
     assert view._night_star(view._ranked[bright], False)[2] == 0
+    crowded = view._night_star(view._ranked[bright], False)[1].alpha()
+    lone = view._night_star(view._ranked[2], False)[1].alpha()
+    pinned = view._night_star(view._ranked[4], False)[1].alpha()
+    assert crowded < lone * 0.6
+    assert pinned > crowded
     view._crowd_ids.discard(bright)
     assert view._night_star(view._ranked[bright], False)[2] > 0
 

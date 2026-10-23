@@ -145,6 +145,9 @@ def test_zoom_past_ceiling_schedules_lod(qapp) -> None:
         def hide(self) -> None:
             self._shown = False
 
+        def isVisible(self) -> bool:
+            return self._shown
+
     star = FakeStar()
     m._stars = {1: star}
     m._user_zoom = VIEW_ZOOM_MAX
@@ -153,7 +156,7 @@ def test_zoom_past_ceiling_schedules_lod(qapp) -> None:
     m._sync_live_stars = lambda force=False: star.show()  # type: ignore[method-assign]
     m._set_zoom_target(VIEW_ZOOM_MAX * 1.06, QPoint(10, 10))
     assert m._zoom_active is True
-    assert star._shown is False
+    assert star._shown is True
     assert m._lod_timer.isActive() is True
     m._flush_zoom_lod()
     assert m._zoom_active is False
