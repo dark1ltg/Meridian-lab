@@ -1,8 +1,8 @@
 # Changelog
 
-All notable Meridian releases are listed here. Download AppImages from [Releases](https://github.com/dark1ltg/Meridian/releases).
+All notable Meridian releases are listed here. The stable AppImage is on [Meridian releases](https://github.com/dark1ltg/Meridian/releases). The lab AppImage is on [Meridian-lab releases](https://github.com/dark1ltg/Meridian-lab/releases).
 
-## [1.3.6](https://github.com/dark1ltg/Meridian/releases/tag/v1.3.6) — 2026-09-10 (AppImage refreshed 2026-10-22)
+## [1.3.6](https://github.com/dark1ltg/Meridian-lab/releases/tag/v1.3.6) — 2026-09-10 (AppImage refreshed 2026-11-04)
 
 Version stays **1.3.6**. This refresh makes the short listen more honest and the queue more careful — analysis upgrades, placement honesty, and a mass re-queue bug fix — on top of earlier path-to-9 / dual-worker / map-completeness work.
 
@@ -43,9 +43,11 @@ Version stays **1.3.6**. This refresh makes the short listen more honest and the
 - Songs a closer constellation line already joins gather into an unmarked shape. A long line stays a line. Songs piled on one spot stay a pile, and nothing on the map is moved.
 - The quarter grid is gone. The four corners carry colder or warmer light, and diving in fades the constellations and grows a name plus a role chip.
 
-### Lab, published 2026-10-22
+### Lab, published 2026-11-04
 
-These are on lab `main`. The local lab AppImage under `dist/` was rebuilt from that tree on 2026-10-22 at 10:36 PM ET. The date stamped on that image is that same Eastern Time day.
+These are on lab `main`. The lab AppImage was built from that tree on 2026-11-04 at 12:15 PM ET and published on the [Meridian-lab releases page](https://github.com/dark1ltg/Meridian-lab/releases). The date stamped on that image is that same Eastern Time day.
+
+- The lab AppImage is on the Meridian-lab releases page, published 2026-11-04.
 
 - A beat that does not land on the heard hits is refused. A fast song whose tracker locked to half speed is checked against a double-time grid before that refusal. A refused pulse does not push Kinetic and does not take the BPM bonus. A tag BPM can still set the pace.
 - A mostly spoken window is remembered and can dim confidence. A borderline musical frame is not treated as speech. Quiet but even hits are not called faint. A melody that moves an octave can still count as one held tone.
@@ -123,7 +125,7 @@ These are on lab `main`. The local lab AppImage under `dist/` was rebuilt from t
 
 - AppImage baseline remains Ubuntu 24.04 / glibc 2.38+.
 - Host **ffmpeg** required for mood analysis; system **libx264** for H.264 playback through Qt’s FFmpeg plugin (not bundled).
-- Release AppImage refreshed **2026-10-22** with the lab sky, on top of the analysis upgrades, placement honesty, and kept-prior defer fix (plus earlier path-to-9 / dual-worker / map-completeness work).
+- Release AppImage refreshed **2026-11-04** and published on the Meridian-lab releases page, with the lab sky, on top of the analysis upgrades, placement honesty, and kept-prior defer fix (plus earlier path-to-9 / dual-worker / map-completeness work).
 - **Bug fix:** AppImage AppStream stamp now updates only the newest release row (older history like 1.3.5 stays intact).
 - **Bug fix:** GitHub “Refresh AppImage” workflow no longer fails with Permission denied when writing the SHA256 checksum after a Docker/proot build.
 
