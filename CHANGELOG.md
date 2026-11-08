@@ -48,6 +48,7 @@ Version stays **1.3.6**. This refresh ships a small LGPL ffmpeg inside the AppIm
 These are on lab `main`. The lab AppImage was built from that tree on 2026-11-07 (America/New_York) and published on the [Meridian-lab releases page](https://github.com/dark1ltg/Meridian-lab/releases). The date stamped on that image is that same Eastern Time day.
 
 - The lab AppImage ships a small LGPL ffmpeg for the short listen. A launched image finds that binary first on PATH, so mood analysis does not need a host ffmpeg. The build decodes common audio to raw PCM: no libx264, no libx265, no `--enable-gpl`, no nonfree codecs. The startup warning remains when no ffmpeg is on PATH (a source checkout, or a damaged image). System libx264 is still not bundled.
+- Aubio in the AppImage is built without libavcodec. The Ubuntu libaubio used before is linked to `libavcodec.so.60`, which needs `libx264.so.164`, and Kubuntu 26.04 only ships `libx264.so.165`. That made `import aubio` fail, so tempo and onset were skipped. Meridian only feeds aubio PCM, so the listen no longer needs that host library.
 - Every imported song lands on the mood map. A real listen still sets the spot. When the listen hears nothing, tags and mood words still set it (`seed only`). When both fail, the song sits in the middle as a dim star with confidence 0 (`no listen · no sticker`) instead of staying off the map. A pin, and a song that already has a listen, stay where they are. Songs with no listen and no sticker share that middle spot. They are not spread apart.
 
 ### Lab, published 2026-11-04

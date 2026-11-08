@@ -136,7 +136,41 @@ if find "$APPDIR" -name 'libx264.so*' 2>/dev/null | grep -q .; then
   find "$APPDIR" -name 'libx264.so*' >&2
   exit 1
 fi
-echo "OK: no bundled libx264 (host library required for H.264 via FFmpeg plugin)"
+echo "OK: no bundled libx264"
+# Distro libaubio pulls libavcodec.so.60, which DT_NEEDs libx264.so.164.
+# Kubuntu 26.04 has libx264.so.165 only, and BIND_NOW makes import fail.
+python3 - "$APPDIR" <<'PY'
+import subprocess
+import sys
+from pathlib import Path
+
+appdir = Path(sys.argv[1])
+bad: list[str] = []
+for path in appdir.rglob("*"):
+    if not path.is_file():
+        continue
+    try:
+        if path.read_bytes()[:4] != b"\x7fELF":
+            continue
+    except OSError:
+        continue
+    needed = subprocess.run(
+        ["readelf", "-d", str(path)],
+        capture_output=True,
+        text=True,
+    ).stdout
+    if "libx264" in needed:
+        bad.append(f"{path}: NEEDED libx264")
+    if path.name.startswith(("libaubio", "_aubio")) and any(
+        token in needed for token in ("libavcodec", "libavformat", "libswresample")
+    ):
+        bad.append(f"{path}: aubio still linked to distro ffmpeg")
+if bad:
+    print("ERROR: aubio/libx264 linkage would fail on hosts without libx264.so.164", file=sys.stderr)
+    print("\n".join(bad), file=sys.stderr)
+    raise SystemExit(1)
+print("OK: aubio does not need host libx264 or distro libavcodec")
+PY
 
 cp "$ROOT/resources/meridian.desktop" "$APPDIR/usr/share/applications/${APP}.desktop"
 cp "$ROOT/resources/meridian.desktop" "$APPDIR/${APP}.desktop"

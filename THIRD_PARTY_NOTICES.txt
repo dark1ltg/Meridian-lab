@@ -45,6 +45,9 @@ aubio
 ----------------------------------------------------------------------------
 Purpose:  Fast tempo / onset features for mood-map energy (kinetic axis)
 License:  GPL-3.0-or-later (see upstream COPYING)
+Build:    AppImage links aubio without libavcodec. Meridian feeds it PCM.
+          Distro libaubio (libavcodec.so.60) needs libx264.so.164, which
+          Kubuntu 26.04 does not ship.
 Texts:    third-party/aubio/
 
 ----------------------------------------------------------------------------

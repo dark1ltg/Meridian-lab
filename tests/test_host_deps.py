@@ -82,3 +82,16 @@ def test_packaging_pins_lgpl_ffmpeg_on_path() -> None:
         "libx265",
     ):
         assert banned not in configure
+
+
+def test_packaging_builds_aubio_without_distro_ffmpeg() -> None:
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    recipe = (root / "packaging" / "build-appimage-ubuntu2404.sh").read_text(encoding="utf-8")
+    audit = (root / "packaging" / "build-appimage.sh").read_text(encoding="utf-8")
+    assert "libavcodec*" in recipe
+    assert "'fftw3f'" in recipe
+    assert "libaubio-dev" not in recipe
+    assert "libx264" in audit
+    assert "aubio still linked to distro ffmpeg" in audit

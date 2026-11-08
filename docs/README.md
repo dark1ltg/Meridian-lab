@@ -11,7 +11,7 @@ Release history is in [CHANGELOG.md](../CHANGELOG.md).
 |---|---|
 | **Baseline OS** | Ubuntu 24.04 LTS (x86_64), or equivalent |
 | **glibc** | **2.38+** required (Ubuntu 24.04 has **2.39**) |
-| **Host tools** | `x264` / `libx264` for H.264 via Qt’s FFmpeg plugin. Mood analysis uses the LGPL `ffmpeg` shipped in the AppImage. A source checkout still needs `ffmpeg` on `PATH`. |
+| **Host tools** | `x264` / `libx264` for H.264 via Qt’s FFmpeg plugin. Mood analysis uses the LGPL `ffmpeg` shipped in the AppImage. Aubio in the image is built without libavcodec, so tempo does not need host `libx264.so.164` (Kubuntu 26.04 ships `.165` only). A source checkout still needs `ffmpeg` on `PATH`. |
 | **Display** | OpenGL mood-map viewport when the driver probe succeeds; software widget if it does not |
 
 Older glibc (e.g. AlmaLinux 9 / 2.34) will not run the release AppImage. AlmaLinux 10 (glibc 2.39) matches the baseline. Build with `packaging/build-appimage-ubuntu2404.sh` for that target.

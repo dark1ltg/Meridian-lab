@@ -106,8 +106,9 @@ a = Analysis(
 )
 
 # libx264 is typically GPL-2.0-only and must not be redistributed inside a
-# GPL-3.0-only Meridian AppImage. Leave it on the host; libavcodec will dlopen
-# the system soname at runtime when present.
+# GPL-3.0-only Meridian AppImage. Aubio is built without libavcodec so it does
+# not DT_NEEDED libx264.so.164 (Kubuntu 26.04 only has .165). Drop any copy
+# PyInstaller still collected.
 a.binaries = [
     entry
     for entry in a.binaries

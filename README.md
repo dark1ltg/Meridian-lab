@@ -2,7 +2,7 @@
 
 This is the testing repo for Meridian. New ideas get tried here. They can break, change, or get thrown away.
 
-Lab `main` and the lab release AppImage were updated 2026-11-07. The image ships an LGPL ffmpeg for mood analysis. Download it from the [releases page](https://github.com/dark1ltg/Meridian-lab/releases).
+Lab `main` and the lab release AppImage were updated 2026-11-07. The image ships an LGPL ffmpeg for mood analysis, and its aubio build does not need host `libx264`. Download it from the [releases page](https://github.com/dark1ltg/Meridian-lab/releases).
 
 Meridian turns your music library into a night sky. Each song is a star. Left to right is mood, from shadow to glow. Bottom to top is energy, from still to moving.
 
