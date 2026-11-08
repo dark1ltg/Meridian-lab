@@ -96,10 +96,17 @@ OpenSSL (libssl/libcrypto) — Apache-2.0  Texts: third-party/openssl/
 See BUILD_LIBRARIES.txt for which of these were detected in a given build.
 
 ----------------------------------------------------------------------------
-ffmpeg CLI (host — mood analysis; not bundled)
+ffmpeg CLI (bundled — mood analysis)
 ----------------------------------------------------------------------------
-Meridian invokes a host `ffmpeg` binary on PATH for optional mood analysis.
-Install it separately under whatever licence applies to your system package.
+The AppImage ships a small static ffmpeg used to decode audio for the mood
+map. A launched image puts `usr/lib/meridian/ffmpeg` first on PATH.
+Licence:  LGPL-2.1-or-later. This build does not pass --enable-gpl, does not
+          link libx264 or libx265, and does not enable nonfree codecs.
+Source:   upstream tarball named in third-party/ffmpeg-cli/FFMPEG_LGPL_BUILD.txt
+          built by packaging/build-ffmpeg-lgpl.sh
+Texts:    third-party/ffmpeg-cli/COPYING.LGPLv2.1
+          third-party/ffmpeg-cli/LGPL-2.1-or-later.txt
+A source checkout (no AppImage) still uses whatever `ffmpeg` is on PATH.
 
 ----------------------------------------------------------------------------
 libx264 (host — not bundled)

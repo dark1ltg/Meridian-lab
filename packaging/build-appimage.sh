@@ -196,10 +196,24 @@ fi
 
 # Full LGPL/GPL texts + inventory of bundled native libs (compliance minimum).
 SPDX_DIR="$ROOT/resources/licenses/spdx"
-if [[ ! -f "$SPDX_DIR/LGPL-3.0-only.txt" ]]; then
-  echo "ERROR: missing $SPDX_DIR/LGPL-3.0-only.txt" >&2
+if [[ ! -f "$SPDX_DIR/LGPL-3.0-only.txt" ]] || [[ ! -f "$SPDX_DIR/LGPL-2.1-or-later.txt" ]]; then
+  echo "ERROR: missing SPDX licence text under $SPDX_DIR" >&2
   exit 1
 fi
+
+# Static LGPL ffmpeg CLI for mood analysis. AppRun puts this directory first
+# on PATH so shutil.which("ffmpeg") finds it before any host binary.
+bash "$ROOT/packaging/build-ffmpeg-lgpl.sh"
+FFMPEG_PREFIX="$ROOT/.appimage-tools/ffmpeg-lgpl"
+FFMPEG_DST="$APPDIR/usr/lib/meridian/ffmpeg"
+mkdir -p "$FFMPEG_DST" "$DOC_THIRD/ffmpeg-cli"
+install -m 0755 "$FFMPEG_PREFIX/bin/ffmpeg" "$FFMPEG_DST/ffmpeg"
+install -m 0644 "$FFMPEG_PREFIX/FFMPEG_LGPL_BUILD.txt" "$FFMPEG_DST/FFMPEG_LGPL_BUILD.txt"
+install -m 0644 "$FFMPEG_PREFIX/FFMPEG_LGPL_BUILD.txt" "$DOC_THIRD/ffmpeg-cli/FFMPEG_LGPL_BUILD.txt"
+install -m 0644 "$FFMPEG_PREFIX/COPYING.LGPLv2.1" "$DOC_THIRD/ffmpeg-cli/COPYING.LGPLv2.1"
+install -m 0644 "$SPDX_DIR/LGPL-2.1-or-later.txt" "$DOC_THIRD/ffmpeg-cli/LGPL-2.1-or-later.txt"
+bash "$ROOT/packaging/build-ffmpeg-lgpl.sh" --check "$FFMPEG_DST/ffmpeg"
+
 run_py "$ROOT/packaging/collect_bundled_licenses.py" "$APPDIR" "$SPDX_DIR"
 install -m 0644 "$LICENSE_FALLBACKS/qt-for-python-NOTICE.txt" "$DOC_THIRD/qt-for-python-NOTICE.txt"
 if [[ ! -f "$DOC_THIRD/qt6/LGPL-3.0-only.txt" ]] || [[ ! -f "$DOC_THIRD/BUILD_LIBRARIES.txt" ]]; then
@@ -255,6 +269,9 @@ for f in \
   "$APPDIR/usr/bin/meridian-desktop-integrate" \
   "$DOC_THIRD/qt6/LGPL-3.0-only.txt" \
   "$DOC_THIRD/BUILD_LIBRARIES.txt" \
+  "$DOC_THIRD/ffmpeg-cli/COPYING.LGPLv2.1" \
+  "$DOC_THIRD/ffmpeg-cli/FFMPEG_LGPL_BUILD.txt" \
+  "$APPDIR/usr/lib/meridian/ffmpeg/ffmpeg" \
   "$DOC_ROOT/SOURCE_OFFER.txt"
 do
   if [[ ! -f "$f" ]]; then
@@ -276,6 +293,8 @@ cat > "$APPDIR/AppRun" <<'EOF'
 HERE="$(dirname "$(readlink -f "$0")")"
 export APPDIR="${APPDIR:-$HERE}"
 export MERIDIAN_FONTS_DIR="${HERE}/usr/share/fonts/truetype/meridian"
+# Bundled LGPL ffmpeg must be the first `ffmpeg` shutil.which finds.
+export PATH="${HERE}/usr/lib/meridian/ffmpeg${PATH:+:$PATH}"
 export QT_PLUGIN_PATH="${HERE}/usr/bin/PySide6/Qt/plugins:${QT_PLUGIN_PATH:-}"
 export QT_QPA_PLATFORM_PLUGIN_PATH="${HERE}/usr/bin/PySide6/Qt/plugins/platforms"
 export QT_MEDIA_BACKEND="${QT_MEDIA_BACKEND:-ffmpeg}"
@@ -297,7 +316,8 @@ Usage:
   Meridian.AppImage --uninstall  Remove menu entry + icons
   Meridian.AppImage --help       Show this help
 
-Host tip: install ffmpeg for mood analysis.
+Mood analysis uses the LGPL ffmpeg shipped in this image (no libx264, no GPL build).
+H.264 playback may still need a system libx264.
 HELP
     exit 0
     ;;
@@ -338,3 +358,5 @@ echo "Built $DIST/${APP}-${ARCH}.AppImage"
 echo "Desktop:   ${DIST}/${APP}-${ARCH}.AppImage --install"
 echo "Licences:  usr/share/doc/meridian/  (+ LICENSE at AppDir root)"
 echo "Fonts/UFL: usr/share/fonts/truetype/meridian/"
+echo "ffmpeg:    usr/lib/meridian/ffmpeg/ffmpeg (LGPL, first on PATH)"
+"$APPDIR/usr/lib/meridian/ffmpeg/ffmpeg" -hide_banner -version

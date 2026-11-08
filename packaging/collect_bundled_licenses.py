@@ -153,12 +153,29 @@ def main() -> int:
         lines.append(f"  texts: third-party/{folder}/")
         lines.append("")
 
-    # Explicit host-only note
+    # libx264 stays on the host. The mood-analysis CLI is the static LGPL binary.
     lines.extend(
         [
             "[host-only — not bundled]",
             "  libx264 / x264 — install from your distribution for H.264 via Qt FFmpeg plugin",
-            "  ffmpeg CLI — used for mood analysis decode; install on PATH",
+            "",
+        ]
+    )
+    ffmpeg_cli = appdir / "usr" / "lib" / "meridian" / "ffmpeg" / "ffmpeg"
+    if not ffmpeg_cli.is_file():
+        print(
+            "ERROR: LGPL ffmpeg CLI missing at usr/lib/meridian/ffmpeg/ffmpeg",
+            file=sys.stderr,
+        )
+        return 1
+    lines.extend(
+        [
+            "[ffmpeg-cli — bundled]",
+            "  path: usr/lib/meridian/ffmpeg/ffmpeg",
+            "  purpose: mood-analysis decode (common audio to raw f32le PCM)",
+            "  licence: LGPL-2.1-or-later (not a GPL build)",
+            "  configure: no --enable-gpl, no libx264, no libx265, no nonfree",
+            "  texts: third-party/ffmpeg-cli/",
             "",
         ]
     )

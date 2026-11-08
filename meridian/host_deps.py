@@ -41,7 +41,12 @@ def host_libx264_available() -> bool:
 
 
 def host_ffmpeg_available() -> bool:
-    """True when the host ``ffmpeg`` CLI is on PATH (needed for mood analyze)."""
+    """True when an ``ffmpeg`` CLI is on PATH (needed for mood analyze).
+
+    A launched AppImage prepends ``usr/lib/meridian/ffmpeg``, so the bundled
+    LGPL binary wins over a host install. A source checkout still uses the
+    host binary.
+    """
     return shutil.which("ffmpeg") is not None
 
 
@@ -63,7 +68,11 @@ def should_warn_missing_libx264() -> bool:
 
 
 def should_warn_missing_ffmpeg() -> bool:
-    """Analyze needs a host ffmpeg binary; AppImage does not ship one."""
+    """Warn only when no ffmpeg is visible on PATH.
+
+    Inside the AppImage the bundled LGPL binary is first on PATH, so this
+    stays quiet. A source checkout still warns until a host ffmpeg appears.
+    """
     return not host_ffmpeg_available()
 
 
@@ -88,13 +97,16 @@ def libx264_missing_status() -> str:
 
 def ffmpeg_missing_message() -> str:
     return (
-        "Meridian needs the host <b>ffmpeg</b> command to decode audio and place "
-        "tracks on the mood map. It is not bundled in the AppImage.\n\n"
-        "ffmpeg was not found on this computer. Playback can still work, but "
-        "scan/analyze will leave stars on genre seeds instead of waveform "
-        "placement.\n\n"
-        "<b>Install ffmpeg from your distribution, then restart Meridian.</b>\n\n"
-        "Examples:\n"
+        "Meridian needs an <b>ffmpeg</b> command to decode audio and place "
+        "tracks on the mood map.\n\n"
+        "The AppImage ships a small LGPL ffmpeg (audio decode only — no libx264, "
+        "no GPL build) and puts that binary first on PATH. It was not found. "
+        "Playback can still work, but scan/analyze will leave stars on genre "
+        "seeds instead of waveform placement.\n\n"
+        "If you are running from a source checkout, install ffmpeg and restart. "
+        "If you are running the AppImage, the bundled ffmpeg is missing — "
+        "download the image again.\n\n"
+        "Examples for a source checkout:\n"
         "• Arch / CachyOS: <code>sudo pacman -S ffmpeg</code>\n"
         "• Fedora: <code>sudo dnf install ffmpeg</code>\n"
         "• Debian / Ubuntu: <code>sudo apt install ffmpeg</code>\n"
@@ -102,7 +114,10 @@ def ffmpeg_missing_message() -> str:
 
 
 def ffmpeg_missing_status() -> str:
-    return "Mood analysis needs ffmpeg on this system (e.g. pacman -S ffmpeg), then restart."
+    return (
+        "Mood analysis needs ffmpeg on PATH — the AppImage ships one; "
+        "a source checkout needs it installed (e.g. pacman -S ffmpeg), then restart."
+    )
 
 
 def _rotational_from_sysfs(sys_node: Path) -> bool | None:

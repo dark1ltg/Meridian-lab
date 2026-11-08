@@ -47,11 +47,22 @@ B. Other GPL / LGPL components redistributed in this AppImage
   GPL-3.0) as separate components; full LGPL-3.0 and GPL-3.0 texts are in
   third-party/qt6/ and third-party/pyside6/.
 
+  The mood-analysis `ffmpeg` CLI is a separate LGPL-2.1-or-later build of
+  upstream FFmpeg. It is static, decode-only, and configured without
+  `--enable-gpl`, without nonfree codecs, and without libx264 or libx265.
+  The exact upstream tarball, version, and configure line are recorded in:
+
+      usr/share/doc/meridian/third-party/ffmpeg-cli/FFMPEG_LGPL_BUILD.txt
+
+  Corresponding Source for that binary is that upstream tarball, built with
+  `packaging/build-ffmpeg-lgpl.sh` from the Meridian source that accompanies
+  this AppImage. The LGPL-2.1 text shipped by upstream is in
+  `third-party/ffmpeg-cli/COPYING.LGPLv2.1`.
+
 ----------------------------------------------------------------------------
 C. Not redistributed in this AppImage
 ----------------------------------------------------------------------------
 
-  - Host `ffmpeg` CLI (mood analysis) — install separately.
   - Host `libx264` (GPL-2.0-only; incompatible to bundle with Meridian GPL-3)
     — install separately if needed for H.264 via Qt’s FFmpeg plugin.
 

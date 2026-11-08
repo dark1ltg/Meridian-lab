@@ -272,7 +272,7 @@ class MainWindow(QMainWindow):
         self._set_status(libx264_missing_status())
 
     def _maybe_warn_ffmpeg(self) -> None:
-        """Mood analyze needs host ffmpeg — warn when PATH has no binary."""
+        """Mood analyze needs ffmpeg on PATH — the AppImage ships an LGPL one."""
         if not should_warn_missing_ffmpeg():
             self._host_ffmpeg_sticky = False
             return

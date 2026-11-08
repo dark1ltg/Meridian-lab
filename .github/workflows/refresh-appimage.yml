@@ -72,11 +72,12 @@ jobs:
           - **Smarter short listens:** long songs get intro / middle / end tastes (~12s each) instead of one mid-track peek.
           - **Whole library on the map:** any audible listen places a star (weak when partial); tags alone place a rough star; only truly empty tracks stay pending.
           - **Bug fixes:** good listens are not wiped by a bad retry; rough pins stay dim; scan waits while analyze/tidy runs; tidy runs off the UI thread; honest status when a pass was tags-only.
+          - **Mood analysis** uses the LGPL ffmpeg shipped in the AppImage (no libx264, no GPL build). A source checkout still needs ffmpeg on PATH.
 
-          Source tag \`v1.3.6\` points at master \`${COMMIT}\` (GitHub Source code zip/tar.gz match this commit).
+          Source tag \`v1.3.6\` points at main \`${COMMIT}\` (GitHub Source code zip/tar.gz match this commit).
           AppImage SHA256: \`${SHA}\`
 
-          See [CHANGELOG.md](https://github.com/dark1ltg/Meridian/blob/master/CHANGELOG.md) for full notes.
+          See [CHANGELOG.md](https://github.com/dark1ltg/Meridian-lab/blob/main/CHANGELOG.md) for full notes.
 
           ## Still in 1.3.6
           Queue/Rescan/search reliability (2026-10-02), mood-map import UX (2026-09-25), Renew Queue, mid-fade credit, VA album anti-repeat, BPM 0 scan confidence, Renew first-run tip, pin lock rings."
@@ -93,6 +94,6 @@ jobs:
             --target "$COMMIT" \
             dist/Meridian-x86_64.AppImage
 
-          echo "Published https://github.com/dark1ltg/Meridian/releases/tag/v1.3.6"
-          echo "AppImage https://github.com/dark1ltg/Meridian/releases/download/v1.3.6/Meridian-x86_64.AppImage"
+          echo "Published https://github.com/dark1ltg/Meridian-lab/releases/tag/v1.3.6"
+          echo "AppImage https://github.com/dark1ltg/Meridian-lab/releases/download/v1.3.6/Meridian-x86_64.AppImage"
           echo "SHA256 ${SHA}"

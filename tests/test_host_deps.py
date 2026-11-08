@@ -20,8 +20,12 @@ def test_libx264_message_mentions_install() -> None:
 
 def test_ffmpeg_message_mentions_install() -> None:
     msg = ffmpeg_missing_message()
-    assert "ffmpeg" in msg.lower()
+    lowered = msg.lower()
+    assert "ffmpeg" in lowered
     assert "pacman" in msg
+    assert "lgpl" in lowered
+    assert "not bundled" not in lowered
+    assert "does not ship" not in lowered
 
 
 def test_should_warn_respects_gstreamer(monkeypatch) -> None:
@@ -50,6 +54,31 @@ def test_should_warn_missing_ffmpeg_cli(monkeypatch) -> None:
     monkeypatch.setattr("meridian.host_deps.shutil.which", lambda _n: None)
     assert host_ffmpeg_available() is False
     assert should_warn_missing_ffmpeg() is True
-    monkeypatch.setattr("meridian.host_deps.shutil.which", lambda _n: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        "meridian.host_deps.shutil.which",
+        lambda _n: "/tmp/Meridian.AppDir/usr/lib/meridian/ffmpeg/ffmpeg",
+    )
     assert host_ffmpeg_available() is True
     assert should_warn_missing_ffmpeg() is False
+
+
+def test_packaging_pins_lgpl_ffmpeg_on_path() -> None:
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    appimage = (root / "packaging" / "build-appimage.sh").read_text(encoding="utf-8")
+    recipe = (root / "packaging" / "build-ffmpeg-lgpl.sh").read_text(encoding="utf-8")
+    configure = recipe.split("args=(", 1)[1].split("make -j", 1)[0]
+    assert 'export PATH="${HERE}/usr/lib/meridian/ffmpeg${PATH:+:$PATH}"' in appimage
+    assert "--disable-gpl" in configure
+    assert "--disable-nonfree" in configure
+    assert "--enable-static" in configure
+    for banned in (
+        "--enable-gpl",
+        "--enable-nonfree",
+        "--enable-libx264",
+        "--enable-libx265",
+        "libx264",
+        "libx265",
+    ):
+        assert banned not in configure

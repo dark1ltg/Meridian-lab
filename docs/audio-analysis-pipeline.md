@@ -45,7 +45,7 @@ That gives a starting “neighborhood” — like “this is probably metal-ener
 
 ### 3. The short listen (`ffmpeg`)
 
-It asks your computer’s `ffmpeg` for those section windows. Meridian does **not** ship `ffmpeg` inside the AppImage — it must be on the host `PATH`.
+It asks `ffmpeg` for those section windows. The AppImage ships a small LGPL `ffmpeg` and puts that binary first on `PATH`, so a launched image does not need a host install. The bundled build decodes common audio to raw PCM. It is not a GPL build: no libx264, no libx265, and no nonfree codecs. A source checkout uses whatever `ffmpeg` is already on `PATH`.
 
 - Seeks stay inside the known duration (unknown length → about **28 seconds** from the start, not a tiny stub).  
 - On long tracks, intro / mid / late are compared. A silent or cold-open intro does **not** veto a clear mid+late body. When mid and late **agree closely** *and* the intro is clearly offset (not a mild build-up), Meridian soft-biases that body so a flashy intro can’t yank the pin — normal intros keep more say. When sections disagree, it keeps the **steadier** song-like taste and may inject contrast from a more active window — not a fake middle.  
@@ -53,7 +53,7 @@ It asks your computer’s `ffmpeg` for those section windows. Meridian does **no
 - If there is no usable audio but genre, folder, or mood words exist, analyze concludes as `seed only` (low-trust) and the star stays on the map.  
 - If there is no usable audio **and** no genre/path/keyword evidence, analyze still places the song: the middle of the map, confidence exactly 0, note `no listen · no sticker`, and `analyzed` set so the sky does not hide it. It does not stay pending.  
 - If a later pass can’t hear audio but Meridian **already kept a good pin** (`pcm pending · kept prior`), that row is **concluded as analyzed** so the whole library isn’t re-queued every launch. **Rescan** still clears analyzed on purpose when you ask for a fresh listen.  
-- If `ffmpeg` is missing, Meridian still plays music. Analyze places stars from genre and mood words, and puts a song with neither in the middle as a dim star. It does not invent a waveform placement. Startup shows a warning dialog and a sticky status tip (same idea as the missing-libx264 tip).  
+- If `ffmpeg` is missing (a source checkout, or a damaged image), Meridian still plays music. Analyze places stars from genre and mood words, and puts a song with neither in the middle as a dim star. It does not invent a waveform placement. Startup shows a warning dialog and a sticky status tip (same idea as the missing-libx264 tip). Inside a normal AppImage that warning stays quiet, because the bundled binary is on `PATH`.
 - Stopping analyze kills every in-flight `ffmpeg` process (one or two analyze workers on SSD/NVMe).  
 - Large libraries on flash storage may run **two** analyze workers silently (HDD stays at one).
 

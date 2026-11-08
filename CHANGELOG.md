@@ -2,9 +2,9 @@
 
 All notable Meridian releases are listed here. The stable AppImage is on [Meridian releases](https://github.com/dark1ltg/Meridian/releases). The lab AppImage is on [Meridian-lab releases](https://github.com/dark1ltg/Meridian-lab/releases).
 
-## [1.3.6](https://github.com/dark1ltg/Meridian-lab/releases/tag/v1.3.6) — 2026-09-10 (AppImage refreshed 2026-11-04)
+## [1.3.6](https://github.com/dark1ltg/Meridian-lab/releases/tag/v1.3.6) — 2026-09-10 (AppImage refreshed 2026-11-07)
 
-Version stays **1.3.6**. This refresh makes the short listen more honest and the queue more careful — analysis upgrades, placement honesty, and a mass re-queue bug fix — on top of earlier path-to-9 / dual-worker / map-completeness work.
+Version stays **1.3.6**. This refresh ships a small LGPL ffmpeg inside the AppImage so the short listen can decode audio without a host ffmpeg. Every imported song lands on the map, including one the listen and the sticker both miss. It keeps the more honest listen, the more careful queue, and the earlier path-to-9 / dual-worker / map-completeness work.
 
 ### Analysis & honesty (this AppImage)
 
@@ -43,10 +43,11 @@ Version stays **1.3.6**. This refresh makes the short listen more honest and the
 - Songs a closer constellation line already joins gather into an unmarked shape. A long line stays a line. Songs piled on one spot stay a pile, and nothing on the map is moved.
 - The quarter grid is gone. The four corners carry colder or warmer light, and diving in fades the constellations and grows a name plus a role chip.
 
-### Lab, 2026-11-07
+### Lab, published 2026-11-07
 
-On lab `main` after the 2026-11-04 AppImage. This commit does not publish a new image.
+These are on lab `main`. The lab AppImage was built from that tree on 2026-11-07 (America/New_York) and published on the [Meridian-lab releases page](https://github.com/dark1ltg/Meridian-lab/releases). The date stamped on that image is that same Eastern Time day.
 
+- The lab AppImage ships a small LGPL ffmpeg for the short listen. A launched image finds that binary first on PATH, so mood analysis does not need a host ffmpeg. The build decodes common audio to raw PCM: no libx264, no libx265, no `--enable-gpl`, no nonfree codecs. The startup warning remains when no ffmpeg is on PATH (a source checkout, or a damaged image). System libx264 is still not bundled.
 - Every imported song lands on the mood map. A real listen still sets the spot. When the listen hears nothing, tags and mood words still set it (`seed only`). When both fail, the song sits in the middle as a dim star with confidence 0 (`no listen · no sticker`) instead of staying off the map. A pin, and a song that already has a listen, stay where they are. Songs with no listen and no sticker share that middle spot. They are not spread apart.
 
 ### Lab, published 2026-11-04
@@ -130,8 +131,8 @@ These are on lab `main`. The lab AppImage was built from that tree on 2026-11-04
 ### Packaging
 
 - AppImage baseline remains Ubuntu 24.04 / glibc 2.38+.
-- Host **ffmpeg** required for mood analysis; system **libx264** for H.264 playback through Qt’s FFmpeg plugin (not bundled).
-- Release AppImage refreshed **2026-11-04** and published on the Meridian-lab releases page, with the lab sky, on top of the analysis upgrades, placement honesty, and kept-prior defer fix (plus earlier path-to-9 / dual-worker / map-completeness work).
+- The AppImage ships a static **LGPL ffmpeg** for mood analysis and puts it first on PATH. It is decode-only (no libx264, no libx265, no `--enable-gpl`, no nonfree). A source checkout still needs a host ffmpeg. System **libx264** is still required for H.264 playback through Qt’s FFmpeg plugin (not bundled).
+- Release AppImage refreshed **2026-11-07** and published on the Meridian-lab releases page, with the bundled LGPL ffmpeg on top of the lab sky, the analysis upgrades, placement honesty, and the kept-prior defer fix (plus earlier path-to-9 / dual-worker / map-completeness work).
 - **Bug fix:** AppImage AppStream stamp now updates only the newest release row (older history like 1.3.5 stays intact).
 - **Bug fix:** GitHub “Refresh AppImage” workflow no longer fails with Permission denied when writing the SHA256 checksum after a Docker/proot build.
 

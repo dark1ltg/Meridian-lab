@@ -91,7 +91,7 @@ bootstrap_proot_packages() {
       apt-get update
       apt-get install -y --no-install-recommends \
         python3 python3-venv python3-pip python3-dev \
-        build-essential pkg-config curl ca-certificates \
+        build-essential pkg-config curl ca-certificates xz-utils \
         libaubio-dev \
         libgl1 libegl1 libglib2.0-0 libxkbcommon0 libdbus-1-3 \
         libxcb-cursor0 libxcb-xinerama0 libx11-xcb1 \
