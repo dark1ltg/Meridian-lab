@@ -215,6 +215,11 @@ KEYWORD_SHIFT_CAP = 0.18
 REPLAYGAIN_ENERGY_CAP = 0.06
 DEFAULT_VALENCE = 0.5
 DEFAULT_ENERGY = 0.48
+# Exact middle of Shadow↔Glow and Still↔Kinetic. Scan's stickerless prior
+# uses DEFAULT_ENERGY (0.48); a failed listen with no sticker does not.
+MAP_CENTER_VALENCE = 0.5
+MAP_CENTER_ENERGY = 0.5
+NO_LISTEN_NOTE = "no listen · no sticker"
 
 
 def _note_tokens(note: str) -> list[str]:
@@ -2854,6 +2859,13 @@ def analyze_audio(
         variation=float(getattr(profile, "variation", 0.0) or 0.0) if profile else 0.0,
         shape_note=shape_note,
     )
+    if not pcm_ok and not seed_evidence:
+        # No usable audio and no sticker: one dim star in the middle.
+        # Do not keep the path jitter — these songs stay stacked.
+        valence = MAP_CENTER_VALENCE
+        energy = MAP_CENTER_ENERGY
+        confidence = 0.0
+        note = NO_LISTEN_NOTE
     steer = steer_weight_from_listen(
         pcm_ok=pcm_ok,
         multi_window=multi_window,

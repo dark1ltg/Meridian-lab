@@ -9,6 +9,9 @@ from PySide6.QtCore import QObject, Signal, QThread
 
 from meridian.features import (
     AUDIO_EXTS,
+    MAP_CENTER_ENERGY,
+    MAP_CENTER_VALENCE,
+    NO_LISTEN_NOTE,
     analyze_audio,
     confidence_low_trust,
     genre_seed,
@@ -365,7 +368,20 @@ class AnalyzeWorker(QObject):
                                 from_pcm=False,
                             )
                         else:
-                            self.library.defer_analyze(track.id)
+                            # No waveform and no sticker. Land a dim star in the
+                            # middle. from_pcm=False leaves a pin or a stored
+                            # listen where it already is.
+                            self.library.set_analyzed_mood(
+                                track.id,
+                                MAP_CENTER_VALENCE,
+                                MAP_CENTER_ENERGY,
+                                result.bpm,
+                                confidence=0.0,
+                                low_trust=True,
+                                confidence_note=NO_LISTEN_NOTE,
+                                steer_weight=0.0,
+                                from_pcm=False,
+                            )
                     else:
                         self.library.set_analyzed_mood(
                             track.id,

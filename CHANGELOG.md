@@ -43,6 +43,12 @@ Version stays **1.3.6**. This refresh makes the short listen more honest and the
 - Songs a closer constellation line already joins gather into an unmarked shape. A long line stays a line. Songs piled on one spot stay a pile, and nothing on the map is moved.
 - The quarter grid is gone. The four corners carry colder or warmer light, and diving in fades the constellations and grows a name plus a role chip.
 
+### Lab, 2026-11-07
+
+On lab `main` after the 2026-11-04 AppImage. This commit does not publish a new image.
+
+- Every imported song lands on the mood map. A real listen still sets the spot. When the listen hears nothing, tags and mood words still set it (`seed only`). When both fail, the song sits in the middle as a dim star with confidence 0 (`no listen · no sticker`) instead of staying off the map. A pin, and a song that already has a listen, stay where they are. Songs with no listen and no sticker share that middle spot. They are not spread apart.
+
 ### Lab, published 2026-11-04
 
 These are on lab `main`. The lab AppImage was built from that tree on 2026-11-04 at 12:15 PM ET and published on the [Meridian-lab releases page](https://github.com/dark1ltg/Meridian-lab/releases). The date stamped on that image is that same Eastern Time day.

@@ -322,14 +322,23 @@ def test_pulse_clarity_gates_bpm_kinetic() -> None:
     assert muddy_r.energy < clear_r.energy + 0.02
     assert clear_r.energy > muddy_r.energy + 0.02
 
-    # No PCM: tag BPM nudge still applies (gate only when pulse was measured).
+    # No PCM: a tag BPM still nudges a sticker. No sticker means the middle,
+    # even when a tag BPM is present — that is not a listen and not a mood word.
     with patch(
         "meridian.features._decode_pcm_with_fallback",
         return_value=(None, False, None, None),
     ):
-        with_bpm = analyze_audio("/tmp/nopcm_pulse.flac", "", "x", "y", 170.0)
-        no_bpm = analyze_audio("/tmp/nopcm_pulse.flac", "", "x", "y", None)
+        with_bpm = analyze_audio("/tmp/nopcm_pulse.flac", "ambient", "x", "y", 170.0)
+        no_bpm = analyze_audio("/tmp/nopcm_pulse.flac", "ambient", "x", "y", None)
+        bare_bpm = analyze_audio("/tmp/nopcm_pulse.flac", "", "x", "y", 170.0)
+        bare = analyze_audio("/tmp/nopcm_pulse.flac", "", "x", "y", None)
     assert with_bpm.energy > no_bpm.energy + 0.03
+    assert with_bpm.seed_evidence is True
+    assert abs(bare_bpm.energy - 0.5) < 1e-9
+    assert abs(bare.energy - 0.5) < 1e-9
+    assert abs(bare_bpm.valence - 0.5) < 1e-9
+    assert bare_bpm.confidence == 0.0
+    assert bare.confidence_note == "no listen · no sticker"
 
 
 def test_keyword_nudge_zeroed_on_pcm_contradiction() -> None:

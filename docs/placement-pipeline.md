@@ -1,6 +1,6 @@
 # How stars get placed (placement)
 
-This guide explains, in plain language, how Meridian decides **where a song’s star sits** on the mood map. It matches lab `main` as of 2026-11-04.
+This guide explains, in plain language, how Meridian decides **where a song’s star sits** on the mood map. It matches lab `main` as of 2026-11-07.
 
 For how it takes the short listen, see [How Meridian listens](audio-analysis-pipeline.md).
 
@@ -89,9 +89,9 @@ Without listening again:
 ### Partial listens and “seed only”
 
 - Heard *some* audio but not a solid middle → star still placed, marked low-trust.  
-- Heard nothing but tags/folders help → rough `seed only` place (better than a missing star).  
-- Heard nothing *and* no tags → deferred for a later retry.  
-- A later failed listen does **not** overwrite a prior good waveform pin — and that “kept prior” case is marked analyzed so every launch doesn’t re-queue thousands of finished tracks (Rescan still retries on purpose).
+- Heard nothing but tags or mood words help → rough `seed only` place.  
+- Heard nothing *and* no sticker → a dim star in the middle of the map, confidence exactly 0 (`no listen · no sticker`). It is marked analyzed, so it stays on the sky. Those songs share that one spot. They are not spread apart.  
+- A later failed listen does **not** overwrite a prior good waveform pin, and it does not move a pin — that “kept prior” case is marked analyzed so every launch doesn’t re-queue thousands of finished tracks (Rescan still retries on purpose).
 
 ## How listening feeds placement
 

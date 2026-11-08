@@ -1,4 +1,4 @@
-"""No waveform: conclude on tags; defer only with no audio and no tag evidence."""
+"""No waveform: tags place the song; no sticker places a dim center star."""
 
 from __future__ import annotations
 
@@ -43,6 +43,11 @@ def test_analyze_audio_seed_evidence_without_pcm() -> None:
     assert "seed only" in (tagged.confidence_note or "")
     assert bare.pcm_ok is False
     assert bare.seed_evidence is False
+    assert bare.valence == pytest.approx(0.5)
+    assert bare.energy == pytest.approx(0.5)
+    assert bare.confidence == pytest.approx(0.0)
+    assert bare.low_trust is True
+    assert bare.confidence_note == "no listen · no sticker"
 
 
 def test_analyze_worker_concludes_seed_does_not_defer(tmp_path: Path, qapp) -> None:
@@ -273,7 +278,7 @@ def test_requeue_seed_only_without_pcm(tmp_path: Path) -> None:
         lib.close()
 
 
-def test_analyze_worker_defers_without_audio_or_tags(tmp_path: Path, qapp) -> None:
+def test_analyze_worker_places_center_without_audio_or_tags(tmp_path: Path, qapp) -> None:
     from meridian.library import Library
     from meridian.scanner import AnalyzeWorker
     from meridian.features import MoodResult
@@ -328,9 +333,13 @@ def test_analyze_worker_defers_without_audio_or_tags(tmp_path: Path, qapp) -> No
                 AnalyzeWorker(lib).run()
         t = lib.get(tid)
         assert t is not None
-        assert t.analyzed is False
-        assert "pcm pending" in (t.confidence_note or "")
+        assert t.analyzed is True
+        assert t.valence == pytest.approx(0.5)
+        assert t.energy == pytest.approx(0.5)
+        assert t.mood_confidence == pytest.approx(0.0)
+        assert t.confidence_note == "no listen · no sticker"
+        assert tid not in lib.unanalyzed_ids()
         _pcm, deferred = lib.analyze_session_stats()
-        assert deferred == 1
+        assert deferred == 0
     finally:
         lib.close()

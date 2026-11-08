@@ -466,6 +466,7 @@ class Library:
                         timbre_flag = COALESCE(?, timbre_flag),
                         timbre_source = COALESCE(?, timbre_source),
                         steer_weight = CASE
+                            WHEN pinned = 1 THEN steer_weight
                             WHEN brightness IS NOT NULL OR acoustic_flux IS NOT NULL THEN steer_weight
                             ELSE COALESCE(?, steer_weight) END,
                         analyzed = 1
@@ -782,6 +783,7 @@ class Library:
         from meridian.features import (
             CONFIDENCE_HIGH,
             CONFIDENCE_LOW,
+            NO_LISTEN_NOTE,
             genre_match,
         )
 
@@ -799,6 +801,11 @@ class Library:
 
         groups: dict[str, list] = {}
         for row in rows:
+            # No listen and no sticker: stay stacked in the middle. Leaving them
+            # in the ranks would spread that pile and shift songs that have a spot.
+            note = row["confidence_note"] if "confidence_note" in row.keys() else ""
+            if NO_LISTEN_NOTE in (note or ""):
+                continue
             key = genre_match(row["genre"] or "") or "_global_"
             groups.setdefault(key, []).append(row)
 
@@ -920,11 +927,13 @@ class Library:
         return int(track_id) in self._playback_denylist
 
     def defer_analyze(self, track_id: int, *, note: str = "pcm pending") -> None:
-        """Leave analyzed=0 but denylist this session so silent PCM miss can retry later.
+        """Leave analyzed=0 but denylist this session so a later pass can retry.
 
-        Use only when there is no prior PCM placement to keep. If acoustics already
-        exist, call :meth:`conclude_kept_prior` instead — leaving analyzed=0 forever
-        re-queues the whole library on every launch.
+        The analyze worker does not use this when a pass finishes with no audio
+        and no sticker: that song is placed in the middle and marked analyzed.
+        Use this only for an explicit hold with no prior PCM placement. If
+        acoustics already exist, call :meth:`conclude_kept_prior` instead —
+        leaving analyzed=0 forever re-queues the whole library on every launch.
         """
         tid = int(track_id)
         self._analyze_denylist.add(tid)
