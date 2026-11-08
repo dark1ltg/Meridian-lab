@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS tracks (
     timbre_flag TEXT,
     timbre_source TEXT,
     steer_weight REAL,
-    playback_denied INTEGER NOT NULL DEFAULT 0
+    playback_denied INTEGER NOT NULL DEFAULT 0,
+    taste_marks TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_tracks_mood ON tracks(valence, energy);
@@ -88,6 +89,8 @@ class Track:
     timbre_flag: str | None = None
     timbre_source: str | None = None
     steer_weight: float | None = None
+    # None: heard before tastes were saved. "" : no taste. Otherwise role:ms pairs.
+    taste_marks: str | None = None
 
     @property
     def label(self) -> str:
@@ -161,6 +164,8 @@ class Library:
                 self.conn.execute(
                     "ALTER TABLE tracks ADD COLUMN playback_denied INTEGER NOT NULL DEFAULT 0"
                 )
+            if "taste_marks" not in cols:
+                self.conn.execute("ALTER TABLE tracks ADD COLUMN taste_marks TEXT")
             self.conn.commit()
         # Reload durable playback denylist into the process-local set.
         with self.lock:
@@ -390,6 +395,7 @@ class Library:
         timbre_source: str | None = None,
         steer_weight: float | None = None,
         from_pcm: bool = True,
+        taste_marks: str | None = None,
     ) -> None:
         with self.lock:
             if from_pcm:
@@ -409,6 +415,7 @@ class Library:
                         timbre_flag = ?,
                         timbre_source = ?,
                         steer_weight = ?,
+                        taste_marks = COALESCE(?, taste_marks),
                         analyzed = 1
                     WHERE id = ?
                     """,
@@ -426,6 +433,7 @@ class Library:
                         timbre_flag,
                         timbre_source,
                         steer_weight,
+                        taste_marks,
                         track_id,
                     ),
                 )
@@ -469,6 +477,9 @@ class Library:
                             WHEN pinned = 1 THEN steer_weight
                             WHEN brightness IS NOT NULL OR acoustic_flux IS NOT NULL THEN steer_weight
                             ELSE COALESCE(?, steer_weight) END,
+                        taste_marks = CASE
+                            WHEN brightness IS NOT NULL OR acoustic_flux IS NOT NULL THEN taste_marks
+                            ELSE COALESCE(?, taste_marks) END,
                         analyzed = 1
                     WHERE id = ?
                     """,
@@ -486,6 +497,7 @@ class Library:
                         timbre_flag,
                         timbre_source,
                         steer_weight,
+                        taste_marks,
                         track_id,
                     ),
                 )
@@ -1223,6 +1235,11 @@ class Library:
             steer_weight=(
                 float(row["steer_weight"])
                 if "steer_weight" in row.keys() and row["steer_weight"] is not None
+                else None
+            ),
+            taste_marks=(
+                row["taste_marks"]
+                if "taste_marks" in row.keys() and row["taste_marks"] is not None
                 else None
             ),
         )

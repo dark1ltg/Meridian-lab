@@ -4,7 +4,7 @@
 
 ## 1. File tree
 
-Lab `main` was updated 2026-11-07. The lab AppImage from that day ships an LGPL ffmpeg for mood analysis. It started from `dark1ltg/Meridian` at `b48f89d` and has moved on (night-sky experiments, a more honest short listen, the slide and search-line, a sharper patch that looks up only the songs in view, and a dim middle star for every song the listen and the sticker both miss). A pinch that starts up close keeps the stars on screen, and packed stars draw dimmer. When the start, middle, and end agree, the star looks a little more sure. A shaky song on a tight album looks less sure and stays where the listen put it. History was not mirrored; lab commits stay on `main`. See [CHANGELOG.md](CHANGELOG.md).
+Lab `main` was updated 2026-11-08. The lab AppImage from 2026-11-07 ships an LGPL ffmpeg for mood analysis. It started from `dark1ltg/Meridian` at `b48f89d` and has moved on (night-sky experiments, a more honest short listen, the slide and search-line, a sharper patch that looks up only the songs in view, and a dim middle star for every song the listen and the sticker both miss). The time bar marks the stretches that listen used. A pinch that starts up close keeps the stars on screen, and packed stars draw dimmer. When the start, middle, and end agree, the star looks a little more sure. A shaky song on a tight album looks less sure and stays where the listen put it. History was not mirrored; lab commits stay on `main`. See [CHANGELOG.md](CHANGELOG.md).
 
 To replace this repo with a full history mirror later, from a machine logged in as **dark1ltg**:
 

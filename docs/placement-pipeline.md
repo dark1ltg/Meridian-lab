@@ -1,6 +1,6 @@
 # How stars get placed (placement)
 
-This guide explains, in plain language, how Meridian decides **where a song’s star sits** on the mood map. It matches lab `main` as of 2026-11-07.
+This guide explains, in plain language, how Meridian decides **where a song’s star sits** on the mood map. It matches lab `main` as of 2026-11-08.
 
 For how it takes the short listen, see [How Meridian listens](audio-analysis-pipeline.md).
 
@@ -113,6 +113,8 @@ Without listening again:
 - Not permission for bad tags to be ignored forever, or for noisy audio to rewrite the whole sky.
 
 ## After the star is placed
+
+The time bar marks the stretches that listen used. Clicking one plays that stretch. The star stays put.
 
 While you listen, finishes and skips can gently nudge **unpinned** stars relative to where your lens is.  
 That nudge is drawn as a short slide. A pewter ghost stays on the old spot for about a second. Clicks follow the moving star. A press during the slide keeps the star on the sky. Constellation lines, neighborhood tiles, and the queue path aim at the new spot when the slide starts. A **pin does not slide**.  

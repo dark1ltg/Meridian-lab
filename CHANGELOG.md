@@ -43,6 +43,12 @@ Version stays **1.3.6**. This refresh ships a small LGPL ffmpeg inside the AppIm
 - Songs a closer constellation line already joins gather into an unmarked shape. A long line stays a line. Songs piled on one spot stay a pile, and nothing on the map is moved.
 - The quarter grid is gone. The four corners carry colder or warmer light, and diving in fades the constellations and grows a name plus a role chip.
 
+### Lab, published 2026-11-08
+
+These are on lab `main`. The published lab AppImage is still the 2026-11-07 image until the next refresh.
+
+- The time bar under the song shows a quiet tick for each stretch the short listen actually used. A long song can have three, a shorter song fewer, and a song the listen never heard has none. Click a tick and the song jumps there and plays that stretch. The star stays where it is.
+
 ### Lab, published 2026-11-07
 
 These are on lab `main`. The lab AppImage was built from that tree on 2026-11-07 (America/New_York) and published on the [Meridian-lab releases page](https://github.com/dark1ltg/Meridian-lab/releases). The date stamped on that image is that same Eastern Time day.
