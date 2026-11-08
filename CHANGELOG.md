@@ -2,9 +2,9 @@
 
 All notable Meridian releases are listed here. The stable AppImage is on [Meridian releases](https://github.com/dark1ltg/Meridian/releases). The lab AppImage is on [Meridian-lab releases](https://github.com/dark1ltg/Meridian-lab/releases).
 
-## [1.3.6](https://github.com/dark1ltg/Meridian-lab/releases/tag/v1.3.6) — 2026-09-10 (AppImage refreshed 2026-11-07)
+## [1.3.6](https://github.com/dark1ltg/Meridian-lab/releases/tag/v1.3.6) — 2026-09-10 (AppImage refreshed 2026-11-08)
 
-Version stays **1.3.6**. This refresh ships a small LGPL ffmpeg inside the AppImage so the short listen can decode audio without a host ffmpeg. Every imported song lands on the map, including one the listen and the sticker both miss. It keeps the more honest listen, the more careful queue, and the earlier path-to-9 / dual-worker / map-completeness work.
+Version stays **1.3.6**. This refresh ships a small LGPL ffmpeg inside the AppImage so the short listen can decode audio without a host ffmpeg. Every imported song lands on the map, including one the listen and the sticker both miss. The time bar shows a quiet tick for each stretch that listen used. It keeps the more honest listen, the more careful queue, and the earlier path-to-9 / dual-worker / map-completeness work.
 
 ### Analysis & honesty (this AppImage)
 
@@ -45,7 +45,7 @@ Version stays **1.3.6**. This refresh ships a small LGPL ffmpeg inside the AppIm
 
 ### Lab, published 2026-11-08
 
-These are on lab `main`. The published lab AppImage is still the 2026-11-07 image until the next refresh.
+These are on lab `main`. The lab AppImage was built from that tree on 2026-11-08 (America/New_York) and published on the [Meridian-lab releases page](https://github.com/dark1ltg/Meridian-lab/releases). The date stamped on that image is that same Eastern Time day.
 
 - The time bar under the song shows a quiet tick for each stretch the short listen actually used. A long song can have three, a shorter song fewer, and a song the listen never heard has none. Click a tick and the song jumps there and plays that stretch. The star stays where it is.
 
@@ -139,7 +139,7 @@ These are on lab `main`. The lab AppImage was built from that tree on 2026-11-04
 
 - AppImage baseline remains Ubuntu 24.04 / glibc 2.38+.
 - The AppImage ships a static **LGPL ffmpeg** for mood analysis and puts it first on PATH. It is decode-only (no libx264, no libx265, no `--enable-gpl`, no nonfree). A source checkout still needs a host ffmpeg. System **libx264** is still required for H.264 playback through Qt’s FFmpeg plugin (not bundled).
-- Release AppImage refreshed **2026-11-07** and published on the Meridian-lab releases page, with the bundled LGPL ffmpeg on top of the lab sky, the analysis upgrades, placement honesty, and the kept-prior defer fix (plus earlier path-to-9 / dual-worker / map-completeness work).
+- Release AppImage refreshed **2026-11-08** and published on the Meridian-lab releases page, with the time-bar taste ticks on top of the bundled LGPL ffmpeg, the lab sky, the analysis upgrades, placement honesty, and the kept-prior defer fix (plus earlier path-to-9 / dual-worker / map-completeness work).
 - **Bug fix:** AppImage AppStream stamp now updates only the newest release row (older history like 1.3.5 stays intact).
 - **Bug fix:** GitHub “Refresh AppImage” workflow no longer fails with Permission denied when writing the SHA256 checksum after a Docker/proot build.
 
