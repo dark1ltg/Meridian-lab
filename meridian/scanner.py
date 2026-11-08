@@ -365,6 +365,7 @@ class AnalyzeWorker(QObject):
                                 # prior PCM (library CASE also guards). Never pass a
                                 # weak 0.05 over a real listen via COALESCE alone.
                                 steer_weight=result.steer_weight,
+                                taste_marks=result.taste_marks,
                                 from_pcm=False,
                             )
                         else:
@@ -380,6 +381,7 @@ class AnalyzeWorker(QObject):
                                 low_trust=True,
                                 confidence_note=NO_LISTEN_NOTE,
                                 steer_weight=0.0,
+                                taste_marks="",
                                 from_pcm=False,
                             )
                     else:
@@ -398,6 +400,7 @@ class AnalyzeWorker(QObject):
                             timbre_flag=result.timbre_flag,
                             timbre_source=result.timbre_source,
                             steer_weight=result.steer_weight,
+                            taste_marks=result.taste_marks,
                         )
                 except Exception:
                     # Always denylist in-process; DB mark may fail under lock contention.

@@ -221,6 +221,129 @@ MAP_CENTER_VALENCE = 0.5
 MAP_CENTER_ENERGY = 0.5
 NO_LISTEN_NOTE = "no listen · no sticker"
 
+# Last successful taste starts for this thread. Analyze reads them after decode.
+_taste_marks_local = threading.local()
+
+TASTE_LABELS = {
+    "intro": "Opening",
+    "mid": "Middle",
+    "late": "End",
+    "listen": "Listen",
+}
+
+
+def _remember_tastes(marks: list[tuple[str, float]] | None) -> None:
+    """Keep the starts of tastes that actually came back with sound."""
+    _taste_marks_local.marks = list(marks or [])
+
+
+def consume_taste_marks() -> list[tuple[str, float]]:
+    """Take and clear the tastes remembered by the last decode on this thread."""
+    marks = list(getattr(_taste_marks_local, "marks", []) or [])
+    _taste_marks_local.marks = []
+    return marks
+
+
+def format_taste_marks(marks: list[tuple[str, float]]) -> str:
+    """``intro:0,mid:81000`` — role and start in milliseconds."""
+    parts: list[str] = []
+    for role, start_s in marks:
+        name = str(role or "listen").strip().lower() or "listen"
+        try:
+            ms = int(round(float(start_s) * 1000.0))
+        except (TypeError, ValueError):
+            continue
+        if ms < 0:
+            ms = 0
+        parts.append(f"{name}:{ms}")
+    return ",".join(parts)
+
+
+def parse_taste_marks(text: str | None) -> list[tuple[str, int]]:
+    """Parse a stored taste string into ``(role, start_ms)`` pairs."""
+    raw = str(text or "").strip()
+    if not raw:
+        return []
+    out: list[tuple[str, int]] = []
+    for piece in raw.split(","):
+        role, sep, ms_text = piece.partition(":")
+        if not sep:
+            continue
+        name = role.strip().lower() or "listen"
+        try:
+            ms = int(round(float(ms_text.strip())))
+        except (TypeError, ValueError):
+            continue
+        if ms < 0:
+            continue
+        out.append((name, ms))
+    return out
+
+
+def taste_label(role: str) -> str:
+    return TASTE_LABELS.get(str(role or "").strip().lower(), "Listen")
+
+
+def legacy_taste_marks(track: object) -> list[tuple[str, int]]:
+    """Best marks for a song heard before tastes were saved.
+
+    A shape note means the intro / middle / end plan was used. An edge note
+    keeps only the stretches that note names. A listen with no shape is one
+    tick at the first planned start. A sticker-only song, or a song with no
+    listen, has no ticks.
+    """
+    note = str(getattr(track, "confidence_note", "") or "").lower()
+    if "seed only" in note or "no listen" in note:
+        return []
+    heard = (
+        getattr(track, "brightness", None) is not None
+        or getattr(track, "acoustic_flux", None) is not None
+    )
+    if not heard:
+        return []
+    try:
+        duration_ms = int(getattr(track, "duration_ms", 0) or 0)
+    except (TypeError, ValueError):
+        duration_ms = 0
+    plan = _analysis_window_plan(duration_ms)
+    if not plan:
+        return []
+
+    def _ms(role: str) -> tuple[str, int] | None:
+        for name, start_s in plan:
+            if name == role:
+                return (name, int(round(float(start_s) * 1000.0)))
+        return None
+
+    if "intro only" in note:
+        mark = _ms("intro") or (plan[0][0], int(round(float(plan[0][1]) * 1000.0)))
+        return [mark]
+    if "end only" in note:
+        mark = _ms("late")
+        if mark is None:
+            name, start_s = plan[-1]
+            mark = (name, int(round(float(start_s) * 1000.0)))
+        return [mark]
+    if "ends only" in note:
+        marks = [m for m in (_ms("intro"), _ms("late")) if m is not None]
+        return marks or [(plan[0][0], int(round(float(plan[0][1]) * 1000.0)))]
+    if "mid only" in note:
+        mark = _ms("mid") or (plan[0][0], int(round(float(plan[0][1]) * 1000.0)))
+        return [mark]
+    shape = str(getattr(track, "shape_note", "") or "").strip()
+    if shape or "tastes agree" in note:
+        return [(name, int(round(float(start_s) * 1000.0))) for name, start_s in plan]
+    name, start_s = plan[0]
+    return [(name, int(round(float(start_s) * 1000.0)))]
+
+
+def taste_marks_for_track(track: object) -> list[tuple[str, int]]:
+    """Stored tastes when this listen saved them, otherwise the legacy plan."""
+    stored = getattr(track, "taste_marks", None)
+    if stored is not None:
+        return parse_taste_marks(str(stored))
+    return legacy_taste_marks(track)
+
 
 def _note_tokens(note: str) -> list[str]:
     return [part.strip() for part in str(note or "").split("·") if part.strip()]
@@ -382,6 +505,8 @@ class MoodResult:
     pcm_ok: bool = False
     # Genre/path/keyword evidence usable when waveform decode finds nothing.
     seed_evidence: bool = False
+    # ``intro:0,mid:81000`` for tastes that actually returned sound. Empty if none.
+    taste_marks: str = ""
 
 def _text(tag) -> str:
     if tag is None:
@@ -2086,14 +2211,25 @@ def _decode_pcm_with_fallback(
         _ = head_status
     plan = _analysis_window_plan(duration_ms, audible_start_s=audible_off)
     if not plan:
+        _remember_tastes([])
         return None, False, None, None
+    plan_starts = {role: float(start_s) for role, start_s in plan}
+
+    def _heard(*roles: str) -> list[tuple[str, float]]:
+        return [(role, plan_starts[role]) for role in roles if role in plan_starts]
+
+    def _role_at(start_s: float) -> str:
+        for role, start in plan:
+            if abs(float(start) - float(start_s)) < 0.05:
+                return role
+        return "mid"
 
     # Seeks already tried: no-signal (energy gate) or hard decode miss — do not
     # blindly re-ffmpeg the same offsets in the silence-fallback pass (rehunt score 2).
     # Dual/long-plan salvage: section evidence failed → ~28s single listen.
     dual_salvage = False
     # If longer salvage fails, weak-place this stashed intro stub.
-    edge_fallback: tuple[np.ndarray, str] | None = None
+    edge_fallback: tuple[np.ndarray, str, float] | None = None
 
     # Multi-section path (2 or 3 planned windows).
     if len(plan) >= 2:
@@ -2130,12 +2266,15 @@ def _decode_pcm_with_fallback(
             # Mid-only body is honest placement: full PCM credit, but not multi-window
             # (single section — rebuild cues from PCM so we do not claim a merge).
             if len(role_profiles) == 1 and "mid" in ok_roles:
+                _remember_tastes(_heard("mid"))
                 return role_pcm[rep_role], False, None, None
             # Other single survivors keep the built profile with a weak-fallback tax.
             if len(role_profiles) == 1:
                 sole = next(iter(role_profiles.values()))
+                _remember_tastes(_heard(rep_role))
                 return role_pcm[rep_role], True, sole, None
             merged = _merge_pcm_profiles(None, role_profiles=role_profiles)
+            _remember_tastes(_heard(*[role for role, _start in plan if role in ok_roles]))
             return role_pcm[rep_role], partial, merged, None
 
         # Not enough honest multi-window evidence — still place if we heard music.
@@ -2149,13 +2288,14 @@ def _decode_pcm_with_fallback(
                 # as a section window, not as the salvage length).
                 skip_reseek_starts.discard(round(float(plan[0][1]), 2))
                 if first_role == "intro" and "intro" in role_pcm:
-                    edge_fallback = (role_pcm["intro"], "intro")
+                    edge_fallback = (role_pcm["intro"], "intro", plan_starts.get("intro", 0.0))
             elif ok_roles == {"intro"} and "intro" in role_pcm:
                 # Long-plan intro-only: same ~28s salvage as dual, then weak intro stub.
                 dual_salvage = True
                 skip_reseek_starts.discard(round(float(plan[0][1]), 2))
-                edge_fallback = (role_pcm["intro"], "intro")
+                edge_fallback = (role_pcm["intro"], "intro", plan_starts.get("intro", 0.0))
             elif ok_roles == {"late"} and "late" in role_pcm:
+                _remember_tastes(_heard("late"))
                 return role_pcm["late"], True, None, "late"
             elif ok_roles == {"intro", "late"} and "intro" in role_pcm and "late" in role_pcm:
                 # Start+end, dead middle: weak place from both edges (not genre defer).
@@ -2163,6 +2303,7 @@ def _decode_pcm_with_fallback(
                     role: build_profile(role_pcm[role]) for role in ("intro", "late")
                 }
                 merged = _merge_pcm_profiles(None, role_profiles=role_profiles)
+                _remember_tastes(_heard("intro", "late"))
                 return role_pcm["intro"], True, merged, "ends"
             else:
                 # Any other audible partial: weak place from what we got.
@@ -2172,10 +2313,13 @@ def _decode_pcm_with_fallback(
                     else ("intro" if "intro" in role_pcm else next(iter(role_pcm)))
                 )
                 role_profiles = {role: build_profile(pcm) for role, pcm in role_pcm.items()}
+                heard = _heard(*[role for role, _start in plan if role in ok_roles])
                 if len(role_profiles) == 1:
+                    _remember_tastes(heard or _heard(rep))
                     return role_pcm[rep], True, next(iter(role_profiles.values())), rep
                 merged = _merge_pcm_profiles(None, role_profiles=role_profiles)
                 tag = "ends" if ok_roles == {"intro", "late"} else rep
+                _remember_tastes(heard)
                 return role_pcm[rep], True, merged, tag
 
     # Single-window / silence-fallback / dual-salvage path.
@@ -2224,17 +2368,22 @@ def _decode_pcm_with_fallback(
                     if pcm2 is not None and _pcm_signal_ok(pcm2):
                         # Successful audible re-seek is a full single listen — not
                         # a weak fallback tax (game-cue / front-loaded silence).
+                        _remember_tastes([("mid", float(lead))])
                         return pcm2, False, None, None
             # Longer salvage after multi-window honesty failed — still fallback-taxed.
             # If we only ever had intro evidence, keep the intro edge tag so a pad
             # head cannot look mid-trust after a ~28s re-listen of the same region.
             if edge_fallback is not None:
+                _remember_tastes([("intro", float(ss))])
                 return pcm, True, None, edge_fallback[1]
+            _remember_tastes([(_role_at(float(ss)), float(ss))])
             return pcm, bool(index > 0 or dual_salvage), None, None
     # Longer salvage found nothing — weak-place the stashed intro stub if we have it.
     if edge_fallback is not None:
-        pcm_fb, tag_fb = edge_fallback
+        pcm_fb, tag_fb, start_fb = edge_fallback
+        _remember_tastes([(tag_fb, float(start_fb))])
         return pcm_fb, True, None, tag_fb
+    _remember_tastes([])
     return None, False, None, None
 
 
@@ -2459,9 +2608,12 @@ def analyze_audio(
     profile = None
     soft_shift = SOFT_PCM_MAX_SHIFT
 
+    _remember_tastes([])
     pcm, pcm_fallback, merged_profile, edge_salvage = _decode_pcm_with_fallback(
         path, duration_ms=duration_ms
     )
+    heard_tastes = consume_taste_marks()
+    taste_marks = format_taste_marks(heard_tastes) if pcm is not None else ""
     multi_window = False
     if pcm is not None:
         pcm_ok = True
@@ -2895,4 +3047,5 @@ def analyze_audio(
         steer_weight=float(steer),
         pcm_ok=bool(pcm_ok),
         seed_evidence=seed_evidence,
+        taste_marks=taste_marks if pcm_ok else "",
     )

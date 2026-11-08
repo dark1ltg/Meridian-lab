@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt, Signal, Slot
-from PySide6.QtGui import QColor, QPainter, QPainterPath
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
     QSlider,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
+
+from meridian.features import taste_label
 
 from meridian.ui.fonts import sans
 
@@ -53,7 +56,13 @@ class VolumeSlider(QSlider):
 
 
 class SeekSlider(QSlider):
-    """Click or drag anywhere on the bar to jump to that point in the track."""
+    """Click or drag anywhere on the bar to jump to that point in the track.
+
+    Quiet ticks mark the stretches the short listen actually used. A click on
+    a tick jumps to that stretch.
+    """
+
+    taste_activated = Signal(int, str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(Qt.Orientation.Horizontal, parent)
@@ -62,14 +71,67 @@ class SeekSlider(QSlider):
         self.setTracking(True)
         self.setSingleStep(1000)
         self.setPageStep(5000)
+        self.setMouseTracking(True)
+        self._tastes: list[tuple[str, int]] = []
+        self._taste_press: tuple[int, str] | None = None
+
+    def set_tastes(self, marks: list[tuple[str, int]]) -> None:
+        self._tastes = [(str(role), int(ms)) for role, ms in marks if int(ms) >= 0]
+        self._taste_press = None
+        self.update()
 
     def _value_at(self, x: float) -> int:
         span = max(1, self.width())
         ratio = max(0.0, min(1.0, x / span))
         return int(round(self.minimum() + ratio * (self.maximum() - self.minimum())))
 
+    def _x_for(self, ms: int) -> float:
+        span = max(1, self.maximum() - self.minimum())
+        ratio = (int(ms) - self.minimum()) / span
+        return max(0.0, min(float(self.width()), ratio * float(self.width())))
+
+    def _tick_at(self, x: float) -> tuple[int, str] | None:
+        if not self.isEnabled() or self.maximum() <= self.minimum() or not self._tastes:
+            return None
+        best: tuple[int, str] | None = None
+        best_dist = 7.0
+        for role, ms in self._tastes:
+            if ms > self.maximum():
+                continue
+            dist = abs(float(x) - self._x_for(ms))
+            if dist <= best_dist:
+                best = (ms, role)
+                best_dist = dist
+        return best
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if not self.isEnabled() or self.maximum() <= self.minimum() or not self._tastes:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        pen = QPen(QColor(214, 206, 220, 150))
+        pen.setWidthF(1.4)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        mid = self.height() / 2.0
+        for _role, ms in self._tastes:
+            if ms > self.maximum():
+                continue
+            x = self._x_for(ms)
+            painter.drawLine(int(round(x)), int(mid - 6), int(round(x)), int(mid + 6))
+        painter.end()
+
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton and self.isEnabled():
+            tick = self._tick_at(event.position().x())
+            if tick is not None:
+                self._taste_press = tick
+                self.setSliderDown(True)
+                self.setValue(tick[0])
+                event.accept()
+                return
+            self._taste_press = None
             self.setSliderDown(True)
             self.setValue(self._value_at(event.position().x()))
             event.accept()
@@ -77,13 +139,31 @@ class SeekSlider(QSlider):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
+        if self._taste_press is not None:
+            event.accept()
+            return
         if self.isSliderDown():
             self.setValue(self._value_at(event.position().x()))
             event.accept()
             return
+        tick = self._tick_at(event.position().x())
+        if tick is not None:
+            QToolTip.showText(event.globalPosition().toPoint(), taste_label(tick[1]), self)
+        else:
+            QToolTip.hideText()
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._taste_press is not None:
+            ms, role = self._taste_press
+            self._taste_press = None
+            self.setValue(ms)
+            self.blockSignals(True)
+            self.setSliderDown(False)
+            self.blockSignals(False)
+            self.taste_activated.emit(ms, taste_label(role))
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.LeftButton and self.isSliderDown():
             self.setValue(self._value_at(event.position().x()))
             self.setSliderDown(False)
@@ -97,6 +177,7 @@ class TransportBar(QWidget):
     previous = Signal()
     next = Signal()
     seeked = Signal(int)
+    taste_jumped = Signal(int, str)
     volume_changed = Signal(float)
     love_toggled = Signal()
 
@@ -164,6 +245,7 @@ class TransportBar(QWidget):
         self.seek.sliderMoved.connect(self._scrub)
         self.seek.valueChanged.connect(self._preview_time)
         self.seek.sliderReleased.connect(self._release)
+        self.seek.taste_activated.connect(self._taste)
 
         seek_row = QHBoxLayout()
         seek_row.addWidget(self.elapsed)
@@ -196,6 +278,16 @@ class TransportBar(QWidget):
     def _release(self) -> None:
         self._seeking = False
         self.seeked.emit(self.seek.value())
+
+    def _taste(self, ms: int, label: str) -> None:
+        self._seeking = False
+        self.elapsed.setText(fmt_ms(ms))
+        self.remain.setText(fmt_ms(max(0, self.seek.maximum() - ms)))
+        self.seeked.emit(ms)
+        self.taste_jumped.emit(ms, label)
+
+    def set_tastes(self, marks: list[tuple[str, int]]) -> None:
+        self.seek.set_tastes(marks)
 
     @Slot(int, int)
     def set_progress(self, position: int, duration: int) -> None:

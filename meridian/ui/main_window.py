@@ -23,7 +23,13 @@ from PySide6.QtWidgets import (
 )
 
 from meridian import __version__
-from meridian.features import CONFIDENCE_HIGH, CONFIDENCE_LOW, read_mood_confidence, track_is_unplaced
+from meridian.features import (
+    CONFIDENCE_HIGH,
+    CONFIDENCE_LOW,
+    read_mood_confidence,
+    taste_marks_for_track,
+    track_is_unplaced,
+)
 from meridian.context import (
     LENS_RADIUS_DEFAULT,
     LENS_RADIUS_MAX,
@@ -426,6 +432,7 @@ class MainWindow(QMainWindow):
         self.transport.previous.connect(self.play_prev)
         self.transport.next.connect(self.play_next)
         self.transport.seeked.connect(self.player.seek)
+        self.transport.taste_jumped.connect(self._jump_taste)
         self.transport.volume_changed.connect(self.player.set_volume)
         self.transport.love_toggled.connect(self._love)
         self.player.position_changed.connect(self._pos)
@@ -1356,9 +1363,7 @@ class MainWindow(QMainWindow):
             self._clear_crossfade_credit()
             self.player.stop()
             self.player.play_track(track)
-            self.transport.set_track(
-                track.short_title, f"{track.artist}  ·  {track.album or 'Single'}", track.loved
-            )
+            self._show_transport(track)
             self._rebuild_lock = False
             self._flush_pending_plan_refresh()
             if self.plan:
@@ -1413,12 +1418,25 @@ class MainWindow(QMainWindow):
                 self._credit_listen(outgoing_id, position_ms=outgoing_pos)
             self._commit_play(track_id)
             self._last_hard_play_credit = track_id
-        self.transport.set_track(track.short_title, f"{track.artist}  ·  {track.album or 'Single'}", track.loved)
+        self._show_transport(track)
         self._rebuild_lock = False
         self._flush_pending_plan_refresh()
         if self.plan:
             self.map.set_tracks(self._sky_ranked(track_id), track_id)
         self._fill_queue()
+
+    def _show_transport(self, track) -> None:
+        self.transport.set_track(
+            track.short_title, f"{track.artist}  ·  {track.album or 'Single'}", track.loved
+        )
+        self.transport.set_tastes(taste_marks_for_track(track))
+
+    def _jump_taste(self, ms: int, label: str) -> None:
+        """A taste tick: hear that stretch. The star stays where it is."""
+        self.player.seek(int(ms))
+        if not self.player.is_playing():
+            self.player.toggle()
+        self._set_status(f"{label} taste")
 
     def _clear_crossfade_credit(self) -> None:
         self._crossfade_outgoing_id = None
@@ -1449,7 +1467,7 @@ class MainWindow(QMainWindow):
         # Stop so play_track hard-cuts instead of fading and re-arming credit.
         self.player.stop()
         self.player.play_track(track)
-        self.transport.set_track(track.short_title, f"{track.artist}  ·  {track.album or 'Single'}", track.loved)
+        self._show_transport(track)
         self._rebuild_lock = False
         self._flush_pending_plan_refresh()
         if self.plan:

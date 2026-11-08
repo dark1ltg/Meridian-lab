@@ -1,6 +1,6 @@
 # How Meridian listens (audio analysis)
 
-This guide explains, in plain language, how Meridian takes a **short listen** of each track on your disk. It matches lab `main` as of 2026-11-07.  
+This guide explains, in plain language, how Meridian takes a **short listen** of each track on your disk. It matches lab `main` as of 2026-11-08.  
 It does not need the internet. It does not stream music.
 
 For how that listen turns into a star on the map, see [How stars get placed](placement-pipeline.md).
@@ -14,6 +14,8 @@ Those tastes are blended with a **mid-heavy** mix (roughly 20% intro / 50% mid /
 If the intro head is near-silent (game cues, long pads), windows **shift onto the first audible stretch** so Meridian isn’t tasting only hush.
 
 Shorter tracks get **one or two** windows only — Meridian will not triple-sample the same few seconds of audio.
+
+Those stretches show up as quiet ticks on the time bar, only where a taste actually came back with sound. A long song can have three. A short one has fewer. Click a tick and the song jumps to that stretch so you can hear what the star was built from. The star does not move. A song the listen never heard has no ticks. A song heard before these marks were saved uses the same plan its length would have used, narrowed by notes such as “intro only” or “ends only,” until the next listen stores the real starts.
 
 From that listen it guesses:
 
