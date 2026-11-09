@@ -1,6 +1,6 @@
 # Changelog
 
-All notable Meridian releases are listed here. The stable AppImage is on [Meridian releases](https://github.com/dark1ltg/Meridian/releases). The lab AppImage is on [Meridian-lab releases](https://github.com/dark1ltg/Meridian-lab/releases).
+All notable Meridian releases are listed here. The stable AppImage is on [Meridian releases](https://github.com/dark1ltg/Meridian/releases). The lab AppImage is on [Meridian-lab releases](https://github.com/dark1ltg/Meridian-lab/releases). The lab v1.3.6 AppImage was refreshed 2026-11-08 and points at `bec493cc55ef5cb8bd6cf76fe8da9d64398d1b7a`. The stable dark1ltg/Meridian v1.3.6 download is still the October 18, 2026 file.
 
 ## [1.3.6](https://github.com/dark1ltg/Meridian-lab/releases/tag/v1.3.6) — 2026-09-10 (AppImage refreshed 2026-11-08)
 
@@ -21,7 +21,7 @@ Version stays **1.3.6**. This refresh ships a small LGPL ffmpeg inside the AppIm
 - Muddy pulse skips the BPM→Kinetic step; title/artist mood words that clearly fight a steady listen are undone (genre/folder seed stays).
 
 **Bug fixes**
-- **Kept-prior PCM miss no longer re-queues the whole library:** when a later pass can’t hear audio but Meridian already kept a good pin (`pcm pending · kept prior`), that row is marked analyzed so every launch doesn’t re-listen thousands of finished tracks. Rescan still retries on purpose.
+- **Kept-prior PCM miss no longer re-queues the whole library:** when a later pass can’t hear audio but the row already has brightness or flux, that spot stays and the row is marked analyzed (`pcm pending · kept prior`) so every launch doesn’t re-listen thousands of finished tracks. A pin is not moved. Rescan still retries on purpose.
 - NOW fills with the closest neighbors when everything under the lens is low-steer (no empty NOW from seed-only neighborhoods).
 - Finding audio after a silent head is a normal listen, not a “weak listen” tax; partial multi-window listens can’t claim full steer weight.
 - Skimpy re-analyze keeps a prior shape note; seed-only rows don’t get fake high steer; near-floor hiss stays quiet on Glow.
@@ -35,8 +35,8 @@ Version stays **1.3.6**. This refresh ships a small LGPL ffmpeg inside the AppIm
 - Picking a search result restores the sky. A filename match flares too. The pulse only runs while sound is playing, and only that small spot redraws. The first sky draw does not ripple. Zooming home shows the whole sky during the fall, and a second double-click finishes the trip.
 - The context queue rows are stars in play order. The four matrix lists are plain names again, with the colored top edge and subtitle.
 - Matrix song rows have a little more line height (two pixels above and below). The queue list is unchanged.
-- Unheard songs with no genre sticker stay off the middle of the sky. A clear listen may leave a well-tagged sticker by the evidence widen. Stored brightness and flux finish the spot for trusted songs too. A clean listen lets strong brightness or motion count more. A clear tone draws as a hard point and a noisy one stays softer.
-- A played song still gets the listen nudge, and the acoustic finish no longer skips it. Soundtrack and game labels stay off the sky until a listen. A filename keyword still shows. A muddy flux no longer counts as agreement. A noisy star keeps the same size. A strong clean brightness or motion still moves the point after the genre clamp. The song that is playing stays on the sky even when it has no mood yet.
+- A song the listen and the sticker both miss sits in the middle as a dim star, confidence 0 (`no listen · no sticker`). A clear listen may leave a well-tagged sticker by the evidence widen. Stored brightness and flux finish the spot for trusted songs too. A clean listen lets strong brightness or motion count more. A clear tone draws as a hard point and a noisy one stays softer.
+- A played song still gets the listen nudge, and the acoustic finish no longer skips it. Soundtrack and game labels are not a mood sticker, so those songs stay off the sky until analyze places them. A filename keyword still shows. A muddy flux no longer counts as agreement. A noisy star keeps the same size. A strong clean brightness or motion still moves the point after the genre clamp. The song that is playing stays on the sky even when it has no mood yet.
 - The sky is tiled into unlabelled neighborhoods, with a dark line over the white pile. A crowded stack is sliced even when the songs share one dot, and a round pile is not cut into a square waffle. The finer picture is ready before the first dive. Dragging the lens, and the fall back to the whole sky, leave that picture alone until the fall settles. Constellation lines and pin rings sit above the tile borders. Daytime softens the lines with the rest of the sky.
 - Up close, the stars stay the size they were when you first dived in, and the faded pile and tile lines drop away. Songs that truly share one spot stay one dot with a count. A click lists their names, and the scroll wheel walks through them. The songs under the pointer and inside the lens are the ones that wake up.
 - A crowd no longer wears a glow. The soft halo stays on the song that is playing, on a pin, on the star under the pointer, and on songs that have room around them.
@@ -45,9 +45,9 @@ Version stays **1.3.6**. This refresh ships a small LGPL ffmpeg inside the AppIm
 
 ### Lab, published 2026-11-08
 
-These are on lab `main`. The lab AppImage was built from that tree on 2026-11-08 (America/New_York) and published on the [Meridian-lab releases page](https://github.com/dark1ltg/Meridian-lab/releases). The date stamped on that image is that same Eastern Time day.
+These are on lab `main`. The lab AppImage published that day was built from `bec493cc55ef5cb8bd6cf76fe8da9d64398d1b7a` on 2026-11-08 (America/New_York) and is on the [Meridian-lab releases page](https://github.com/dark1ltg/Meridian-lab/releases). The date stamped on that image is that same Eastern Time day.
 
-- The time bar under the song shows a quiet tick for each stretch the short listen actually used. A long song can have three, a shorter song fewer, and a song the listen never heard has none. Click a tick and the song jumps there and plays that stretch. The star stays where it is.
+- The time bar under the song shows a quiet tick for each stretch the short listen actually used. A long song can have three, a shorter song fewer, and a song the listen never heard has none. Click a tick and the song jumps there and plays that stretch. The star stays where it is. Songs heard before these marks were saved use the plan their length would have used until the next listen stores the real starts.
 
 ### Lab, published 2026-11-07
 
@@ -55,7 +55,7 @@ These are on lab `main`. The lab AppImage was built from that tree on 2026-11-07
 
 - The lab AppImage ships a small LGPL ffmpeg for the short listen. A launched image finds that binary first on PATH, so mood analysis does not need a host ffmpeg. The build decodes common audio to raw PCM: no libx264, no libx265, no `--enable-gpl`, no nonfree codecs. The startup warning remains when no ffmpeg is on PATH (a source checkout, or a damaged image). System libx264 is still not bundled.
 - Aubio in the AppImage is built without libavcodec. The Ubuntu libaubio used before is linked to `libavcodec.so.60`, which needs `libx264.so.164`, and Kubuntu 26.04 only ships `libx264.so.165`. That made `import aubio` fail, so tempo and onset were skipped. Meridian only feeds aubio PCM, so the listen no longer needs that host library.
-- Every imported song lands on the mood map. A real listen still sets the spot. When the listen hears nothing, tags and mood words still set it (`seed only`). When both fail, the song sits in the middle as a dim star with confidence 0 (`no listen · no sticker`) instead of staying off the map. A pin, and a song that already has a listen, stay where they are. Songs with no listen and no sticker share that middle spot. They are not spread apart.
+- Every imported song lands on the mood map. A real listen still sets the spot. When the listen hears nothing, tags and mood words still set it (`seed only`). When both fail, the song sits in the middle as a dim star with confidence 0 (`no listen · no sticker`) instead of staying off the map. A pin is not moved, and a row that already has brightness or flux is not moved. Songs with no listen and no sticker share that middle spot. They are not spread apart.
 
 ### Lab, published 2026-11-04
 
@@ -87,7 +87,7 @@ These are on lab `main`. The lab AppImage was built from that tree on 2026-11-04
 **Your whole collection on the map**
 - If Meridian heard *any* real audio (even just the start or the fade), the track gets a star — marked unsure when the listen was partial.
 - If it heard nothing but tags/folder names exist, it still places a rough star from those (`seed only`) so songs aren’t stuck invisible as “deferred.”
-- It only leaves a track pending when there’s **no audio and no useful tags**.
+- If it heard nothing and there is no sticker, the song still lands: a dim star in the middle, confidence 0 (`no listen · no sticker`). It is not left pending. A pin, and a row that already has brightness or flux, is not moved.
 
 ### Bug fixes
 
@@ -96,11 +96,11 @@ These are on lab `main`. The lab AppImage was built from that tree on 2026-11-04
 - **Fixed:** that handoff now uses real Qt slots so analyze starts after indexing.
 
 **Good listens no longer get wiped by a bad retry**
-- If a song already had a real listen and a later pass can’t hear it, Meridian keeps the good pin and tries again later — it doesn’t replace it with a genre sticky-note.
+- If a row already has brightness or flux and a later pass can’t hear it, Meridian keeps that spot and marks the row analyzed. It does not replace the spot with a genre sticky-note. Rescan still retries on purpose.
 
 **Rough placements stay honestly dim**
 - Start-only / end-only / ends-only listens stay low-confidence so they look unsure on the map.
-- Album tidy can still nudge those stars toward album mates, but it won’t promote them into “looks trusted.”
+- Album tidy can make a shaky song look less sure. It does not pull the star toward album mates, and it does not promote a rough listen into “looks trusted.”
 - A longer salvage listen of a pad/intro head still stays marked intro-only / unsure.
 
 **Honest status messages**
@@ -139,7 +139,7 @@ These are on lab `main`. The lab AppImage was built from that tree on 2026-11-04
 
 - AppImage baseline remains Ubuntu 24.04 / glibc 2.38+.
 - The AppImage ships a static **LGPL ffmpeg** for mood analysis and puts it first on PATH. It is decode-only (no libx264, no libx265, no `--enable-gpl`, no nonfree). A source checkout still needs a host ffmpeg. System **libx264** is still required for H.264 playback through Qt’s FFmpeg plugin (not bundled).
-- Release AppImage refreshed **2026-11-08** and published on the Meridian-lab releases page, with the time-bar taste ticks on top of the bundled LGPL ffmpeg, the lab sky, the analysis upgrades, placement honesty, and the kept-prior defer fix (plus earlier path-to-9 / dual-worker / map-completeness work).
+- Release AppImage refreshed **2026-11-08** and published on the Meridian-lab releases page. That image points at `bec493cc55ef5cb8bd6cf76fe8da9d64398d1b7a`. It has the time-bar taste ticks on top of the bundled LGPL ffmpeg, the lab sky, the analysis upgrades, placement honesty, and the kept-prior defer fix (plus earlier path-to-9 / dual-worker / map-completeness work).
 - **Bug fix:** AppImage AppStream stamp now updates only the newest release row (older history like 1.3.5 stays intact).
 - **Bug fix:** GitHub “Refresh AppImage” workflow no longer fails with Permission denied when writing the SHA256 checksum after a Docker/proot build.
 

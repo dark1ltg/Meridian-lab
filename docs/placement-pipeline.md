@@ -91,7 +91,7 @@ Without listening again:
 - Heard *some* audio but not a solid middle → star still placed, marked low-trust.  
 - Heard nothing but tags or mood words help → rough `seed only` place.  
 - Heard nothing *and* no sticker → a dim star in the middle of the map, confidence exactly 0 (`no listen · no sticker`). It is marked analyzed, so it stays on the sky. Those songs share that one spot. They are not spread apart.  
-- A later failed listen does **not** overwrite a prior good waveform pin, and it does not move a pin — that “kept prior” case is marked analyzed so every launch doesn’t re-queue thousands of finished tracks (Rescan still retries on purpose).
+- A later failed listen does not move a pin, or a row that already has brightness or flux. That kept-prior case is marked analyzed so every launch doesn’t re-queue thousands of finished tracks (Rescan still retries on purpose).
 
 ## How listening feeds placement
 
@@ -114,7 +114,7 @@ Without listening again:
 
 ## After the star is placed
 
-The time bar marks the stretches that listen used. Clicking one plays that stretch. The star stays put.
+The time bar marks the stretches that listen used. Clicking one plays that stretch. The star stays put. Songs heard before these marks were saved use the plan their length would have used until the next listen stores the real starts.
 
 While you listen, finishes and skips can gently nudge **unpinned** stars relative to where your lens is.  
 That nudge is drawn as a short slide. A pewter ghost stays on the old spot for about a second. Clicks follow the moving star. A press during the slide keeps the star on the sky. Constellation lines, neighborhood tiles, and the queue path aim at the new spot when the slide starts. A **pin does not slide**.  

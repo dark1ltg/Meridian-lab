@@ -6,7 +6,7 @@ Lab `main` and the lab release AppImage were updated 2026-11-08. The image ships
 
 Meridian turns your music library into a night sky. Each song is a star. Left to right is mood, from shadow to glow. Bottom to top is energy, from still to moving.
 
-The time bar under the song has a quiet tick for each stretch the short listen actually used. Click one and the song jumps there, so you can hear the opening, the middle, or the end that placed the star. The star stays put.
+The time bar under the song has a quiet tick for each stretch the short listen actually used. Click one and the song jumps there, so you can hear the opening, the middle, or the end that placed the star. The star stays put. Songs heard before these marks were saved use the plan their length would have used until the next listen stores the real starts.
 
 Drag the lens to the part of the sky you feel like. The four lists beside the map fill with the songs under that lens:
 
