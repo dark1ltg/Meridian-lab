@@ -1,6 +1,6 @@
 # Documentation
 
-Extra guides for how Meridian listens to your files and puts them on the mood map. These notes match lab `main` as of 2026-11-11.
+Extra guides for how Meridian listens to your files and puts them on the mood map. These notes match lab `main` as of 2026-11-11. The release AppImage is that same day’s image.
 
 The [main README](../README.md) is the short “what is this / how do I run it” page.  
 Release history is in [CHANGELOG.md](../CHANGELOG.md).

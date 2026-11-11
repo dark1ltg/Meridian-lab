@@ -51,8 +51,8 @@
           From 1.6× to 2.4× the sharper patch stays and those lines fade out.
           At 2.4× songs become stars on their own spots, with a short name and
           one line. The wide picture is cut out of that cluster. The edges stay
-          the picture. The zoom stops at 5×. Stars are not moved to unstack. The
-          published AppImage is still the 2026-11-08 file, with quiet ticks on
+          the picture. The zoom stops at 5×. Stars are not moved to unstack. This
+          AppImage is the 2026-11-11 file, with quiet ticks on
           the time bar and a small LGPL ffmpeg (no libx264, no GPL build).
         </p>
       </description>
