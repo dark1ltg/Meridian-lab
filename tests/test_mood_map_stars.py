@@ -1412,12 +1412,40 @@ def test_live_stars_stay_on_the_lens_and_the_edge_stays_a_picture(qapp) -> None:
     view.show()
     center = _track(1, title="Center", valence=0.5, energy=0.5, mood_confidence=0.9)
     edge = _track(2, title="Edge", valence=0.57, energy=0.5, mood_confidence=0.9)
-    view.set_tracks([_ranked(center), _ranked(edge)], None)
+    near = _track(3, title="Near", valence=0.5 + 8.0 / 720.0, energy=0.5, mood_confidence=0.9)
+    view.set_tracks([_ranked(center), _ranked(edge), _ranked(near)], None)
     view.set_lens(0.5, 0.5, 0.05)
+    places = {tid: (pos.x(), pos.y()) for tid, pos in view._positions.items()}
+    center_pos = view._positions[1]
+    edge_pos = view._positions[2]
+    gap = QPointF((places[1][0] + places[3][0]) * 0.5, places[1][1])
+    assert _field_pixel(view, center_pos).alpha() > 20
+    assert _field_pixel(view, edge_pos).alpha() > 20
+    _settle_zoom(view, 2.4)
+    assert _field_pixel(view, center_pos).alpha() == 0
+    assert _field_pixel(view, gap).alpha() == 0
+    assert _field_pixel(view, edge_pos).alpha() > 20
     _settle_zoom(view, 5.0)
     assert 1 in view._stars
+    assert 3 in view._stars
     assert 2 not in view._stars
+    assert view._user_zoom == pytest.approx(5.0)
+    assert VIEW_ZOOM_MAX == 5.0
+    assert coarse_line_opacity(2.4) == pytest.approx(0.0)
     assert view._field.opacity() == pytest.approx(1.0)
     assert view._regions.opacity() == pytest.approx(0.0)
+    assert _field_pixel(view, center_pos).alpha() == 0
+    assert _field_pixel(view, gap).alpha() == 0
+    assert _field_pixel(view, edge_pos).alpha() > 20
+    for tid, (x, y) in places.items():
+        assert view._positions[tid].x() == pytest.approx(x)
+        assert view._positions[tid].y() == pytest.approx(y)
+    for tid in (1, 3):
+        assert view._stars[tid].pos().x() == pytest.approx(places[tid][0])
+        assert view._stars[tid].pos().y() == pytest.approx(places[tid][1])
     assert view._stars_take_input()
     assert view._stars[1]._role.isVisible()
+    assert view._stars[1]._role.text()
+    _settle_zoom(view, 1.0)
+    assert _field_pixel(view, center_pos).alpha() > 20
+    assert _field_pixel(view, edge_pos).alpha() > 20

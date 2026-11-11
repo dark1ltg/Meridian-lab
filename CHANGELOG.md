@@ -51,7 +51,7 @@ These are on lab `main`. No new AppImage was built, and the v1.3.6 release asset
 - Under 1.6× the sky is the wide picture. Several songs on a spot are one dot and a count. A song alone is one dot. Coarse neighborhood lines are visible. No names. Nothing can be dragged.
 - From 1.6× to 2.4× the sharper patch stays. The coarse lines fade and are gone at 2.4×. Finer neighborhood lines are not drawn. A pile is still one dot and a count. The dot under the pointer can show a short name. Clicking a pile zooms closer. Stars cannot be grabbed in this band, including while a pinch is in progress. A drag pins a star only after the zoom has settled.
 - At 2.4× the lines are gone. The count fades and the songs in that spot become real stars, still on the places they already had. Names come in dim and are readable by 2.6×. Each close star can show one short line: how sure the spot is, or “no listen” when that is why it sits in the middle. A pin shows that it is pinned. The song that is playing shows that it is playing. Artist and album stay in the lists and the bar. There is no card on the star.
-- The zoom stops at 5×. From 2.6× to 5× the same stars stay on their spots, so a loose cluster opens up. The 220 live stars are spent on the cluster under the lens. The edges of the view stay the picture. You can drag a settled close star. A pin and the playing song stay bright.
+- The zoom stops at 5×. From 2.6× to 5× the same stars stay on their spots, so a loose cluster opens up. The 220 live stars are spent on the cluster under the lens. The wide picture is cut out of that cluster. The edges of the view stay the picture. You can drag a settled close star. A pin and the playing song stay bright.
 
 ### Lab, published 2026-11-08
 

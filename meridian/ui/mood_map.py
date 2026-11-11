@@ -1276,6 +1276,7 @@ class MoodMap(QGraphicsView):
         # Press on star core — wait for move before pan vs pin (avoids viewport nudge).
         self._sky_defer_pan = False
         self._field_sig: object | None = None
+        self._field_base: QPixmap | None = None
         self._near_rect: QRectF | None = None
         self._near_sig: object | None = None
         self._detail_name: str | None = None
@@ -2059,7 +2060,7 @@ class MoodMap(QGraphicsView):
         """Paint one settled star onto the sky. Avoids redrawing the whole field."""
         item = self._ranked.get(tid)
         pos = self._positions.get(tid)
-        pix = self._field.pixmap()
+        pix = self._field_source()
         if item is None or pos is None or pix.isNull():
             if tid in self._ranked:
                 self._rebuild_starfield()
@@ -2070,7 +2071,7 @@ class MoodMap(QGraphicsView):
         painter.scale(FIELD_SCALE, FIELD_SCALE)
         self._paint_baked_star(painter, item, pos, len(self._ranked) > 1200)
         painter.end()
-        self._field.setPixmap(QPixmap.fromImage(image))
+        self._set_field_base(QPixmap.fromImage(image))
 
     def _field_signature(self) -> object:
         """Cheap fingerprint so play/nudge/lens refresh can skip a full rebake."""
@@ -2161,7 +2162,7 @@ class MoodMap(QGraphicsView):
 
     def _restamp_appearance(self, ids: list[int]) -> None:
         """Repaint a few stars that stayed put. A pin or a new song does not redraw the sky."""
-        pix = self._field.pixmap()
+        pix = self._field_source()
         if pix.isNull() or not ids:
             if ids:
                 self._rebuild_starfield()
@@ -2213,7 +2214,7 @@ class MoodMap(QGraphicsView):
                 painter.drawEllipse(center, radius, radius)
         self._paint_spots(painter, order, density, None)
         painter.end()
-        self._field.setPixmap(QPixmap.fromImage(image))
+        self._set_field_base(QPixmap.fromImage(image))
         # The sharper picture is of this same sky. It redraws from the grid.
         self._near_sig = None
 
@@ -2326,6 +2327,49 @@ class MoodMap(QGraphicsView):
                 radius, _color, _bloom = self._night_star(item, density)
                 self._paint_spot_count(painter, pos, len(ids), radius)
 
+    def _field_source(self) -> QPixmap:
+        """The uncut sky. A close view punches a copy, never this picture."""
+        if self._field_base is not None and not self._field_base.isNull():
+            return self._field_base
+        return self._field.pixmap()
+
+    def _set_field_base(self, pix: QPixmap) -> None:
+        self._field_base = pix
+        self._show_field_picture()
+
+    def _cluster_cut_active(self) -> bool:
+        """At 2.4× and above the baked dots sit under the live stars and grow with the view."""
+        if self._falling or self._user_zoom < LIVE_STARS_ZOOM:
+            return False
+        return any(star.isVisible() and star.opacity() > 0.04 for star in self._stars.values())
+
+    def _show_field_picture(self) -> None:
+        base = self._field_base
+        if base is None or base.isNull():
+            return
+        if self._cluster_cut_active():
+            self._field.setPixmap(self._picture_without_cluster(base))
+        else:
+            self._field.setPixmap(base)
+
+    def _picture_without_cluster(self, base: QPixmap) -> QPixmap:
+        """Clear the baked glow under each live star. The rest of the picture stays."""
+        image = base.toImage()
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.scale(FIELD_SCALE, FIELD_SCALE)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor(0, 0, 0, 0)))
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+        for star in self._stars.values():
+            if not star.isVisible() or star.opacity() <= 0.04:
+                continue
+            # Bloom is a few body-widths across. The hole is that glow, in scene space.
+            radius = max(16.0, star.rect().width() * 2.3)
+            painter.drawEllipse(star.pos(), radius, radius)
+        painter.end()
+        return QPixmap.fromImage(image)
+
     def _rebuild_starfield(self) -> None:
         """Bake every track into one pixmap — pinch then only scales this texture."""
         w, h = SCENE_W * FIELD_SCALE, SCENE_H * FIELD_SCALE
@@ -2337,10 +2381,10 @@ class MoodMap(QGraphicsView):
         self._paint_star_layer(painter, None)
         painter.end()
         pix = QPixmap.fromImage(img)
-        self._field.setPixmap(pix)
         self._field.setScale(1.0 / FIELD_SCALE)
         self._field.setPos(0, 0)
         self._field.setVisible(True)
+        self._set_field_base(pix)
         links = QPixmap.fromImage(self._baked_link_image())
         self._links.setPixmap(links)
         self._links.setScale(1.0 / FIELD_SCALE)
@@ -2945,6 +2989,7 @@ class MoodMap(QGraphicsView):
         self._lens_color.setOpacity(1.0)
         self._route.setOpacity(1.0)
         self._hide_near_patch()
+        self._show_field_picture()
         self._hover_name.hide()
         self._ensure_regions()
         self._apply_region_opacity()
@@ -3078,6 +3123,7 @@ class MoodMap(QGraphicsView):
         if not self._sky_has_a_picture():
             self._field.setOpacity(1.0)
             self._regions.setOpacity(0.0 if self._user_zoom >= LIVE_STARS_ZOOM else lines)
+        self._show_field_picture()
         self._hover_name.hide()
 
     def _end_zoom_interaction(self) -> None:
@@ -3376,6 +3422,7 @@ class MoodMap(QGraphicsView):
             self._apply_region_opacity(zoom)
             self._apply_search_veil()
             self._sync_near_patch()
+            self._show_field_picture()
             self._sync_hover_name()
             return
 
@@ -3385,6 +3432,7 @@ class MoodMap(QGraphicsView):
         self._apply_search_veil()
         self._hide_close_smear()
         self._sync_near_patch()
+        self._show_field_picture()
         self._sync_hover_name()
 
     def _anchor_point(self, view_pos: QPoint | QPointF) -> QPoint:

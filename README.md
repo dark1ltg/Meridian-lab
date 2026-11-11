@@ -27,7 +27,7 @@ From 1.6× to 2.4× the sharper patch stays. The coarse lines fade and are gone 
 
 At 2.4× the lines are gone. The count fades and the songs in that spot become real stars, still on the places they already had. Names come in dim and are readable by 2.6×. Each close star can show one short line: how sure the spot is, or “no listen” when that is why it sits in the middle. A pin shows that it is pinned. The song that is playing shows that it is playing. Artist and album stay in the lists and the bar. There is no card on the star.
 
-The zoom stops at 5×. From 2.6× to 5× those stars stay on their spots, so a loose cluster opens up. The 220 live stars are spent on the cluster under the lens. The edges of the view stay the picture. You can drag a settled close star. A pin and the playing song stay bright. Stars packed together draw dimmer. The star under the pointer stays bright on the wide sky too. Pinning a song, or the next song starting, updates that one star.
+The zoom stops at 5×. From 2.6× to 5× those stars stay on their spots, so a loose cluster opens up. The 220 live stars are spent on the cluster under the lens. The wide picture is cut out of that cluster. The edges of the view stay the picture. You can drag a settled close star. A pin and the playing song stay bright. Stars packed together draw dimmer. The star under the pointer stays bright on the wide sky too. Pinning a song, or the next song starting, updates that one star.
 
 ![A look at the sky](docs/screenshots/01-overview.png)
 
