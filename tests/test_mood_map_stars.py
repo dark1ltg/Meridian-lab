@@ -27,6 +27,7 @@ from meridian.queue_engine import Quadrant, RankedTrack
 from meridian.ui.mood_map import (
     FIELD_SCALE,
     LIVE_STARS_ZOOM,
+    LOD_LABEL_START,
     LOVED_RING_QCOLOR,
     NEAR_PATCH_SCALE,
     NEAR_PATCH_ZOOM,
@@ -34,21 +35,27 @@ from meridian.ui.mood_map import (
     SKY_LINK_MAX,
     STAR_BODY_FLOOR,
     STAR_BODY_FLOOR_DENSE,
+    VIEW_ZOOM_MAX,
     MoodMap,
     TrackStar,
     _star_mag,
     BIN_SPAN,
+    close_count_opacity,
+    close_name_opacity,
+    coarse_line_opacity,
     constellation_bin_image,
     constellation_groups,
     constellation_segments,
     crowd_ids,
     duration_radius_scale,
     ease_amount,
+    group_exact_spots,
     heartbeat_amount,
     night_body_radius,
     queue_star_color,
     quiet_star_color,
     sky_haze,
+    star_caption,
 )
 from meridian.ui.palette import LOW_TRUST_QCOLOR, PLAYLIST_QCOLOR
 
@@ -134,7 +141,8 @@ def test_zero_confidence_draws_as_a_weak_star(qapp) -> None:
     mid_star.apply_style(mid_star.ranked, False)
     assert zero_star.brush().color().rgb() == quiet_star_color(0).rgb()
     assert mid_star.brush().color().rgb() == quiet_star_color(1).rgb()
-    assert "0.00" in zero_star.toolTip()
+    assert zero_star.toolTip() == ""
+    assert star_caption(zero_star.ranked.track, playing=False) == "unsure"
 
     missing = _track(13, mood_confidence=0.5)
     missing.mood_confidence = None
@@ -337,13 +345,28 @@ def test_queue_route_is_brightest_beside_the_current_song(qapp) -> None:
     assert peak(first, second) > peak(second, third)
 
 
-def test_zoomed_star_can_show_a_role_chip(qapp) -> None:
-    star = TrackStar(_ranked(_track(9, mood_confidence=0.95), Quadrant.DEEP))
+def test_close_star_shows_one_line_and_no_card(qapp) -> None:
+    sure = _track(9, title="Bright", artist="Ada", album="Hidden", mood_confidence=0.95)
+    star = TrackStar(_ranked(sure, Quadrant.DEEP))
+    star.apply_style(star.ranked, current=False)
     assert not star._role.isVisible()
-    star.set_lod(1.0, True)
+    star.set_lod(1.0, True, 1.0, 0.0)
     assert star._label.isVisible()
+    assert star._label.text() == "Bright"
+    assert "Ada" not in star._label.text()
     assert star._role.isVisible()
-    assert star._role.text() == "DEEP"
+    assert star._role.text() == "sure"
+    assert star.toolTip() == ""
+    assert star_caption(sure, playing=False) == "sure"
+    partial = _track(10, mood_confidence=0.5)
+    assert star_caption(partial, playing=False) == "partial"
+    weak = _track(11, mood_confidence=0.1)
+    assert star_caption(weak, playing=False) == "unsure"
+    missing = _track(12, mood_confidence=0.0, confidence_note="no listen · no sticker")
+    assert star_caption(missing, playing=False) == "no listen"
+    pinned = _track(13, mood_confidence=0.2, pinned=True)
+    assert star_caption(pinned, playing=False) == "pinned"
+    assert star_caption(weak, playing=True) == "playing"
 
 
 def test_song_length_changes_star_size() -> None:
@@ -494,10 +517,11 @@ def test_a_pinch_from_close_keeps_the_stars(qapp) -> None:
     view._user_zoom = 6.0
     view._lod_band = -1
     view._sync_live_stars(force=True)
-    assert view._field.opacity() == pytest.approx(0.0)
+    assert view._field.opacity() == pytest.approx(1.0)
+    assert view._regions.opacity() == pytest.approx(0.0)
     view._begin_zoom_interaction()
     assert any(star.isVisible() and star.opacity() > 0.2 for star in view._stars.values())
-    assert view._field.opacity() == pytest.approx(0.0)
+    assert view._field.opacity() == pytest.approx(1.0)
     view._user_zoom = 2.2
     lens = view._lens_color.opacity()
     route = view._route.opacity()
@@ -562,7 +586,7 @@ def test_close_view_keeps_small_stars_and_hides_the_pile(qapp) -> None:
     view._sync_live_stars(force=True)
     star = next(iter(view._stars.values()))
     assert star.scale() == pytest.approx(2.4 / 6.0, abs=0.02)
-    assert view._field.opacity() == pytest.approx(0.0)
+    assert view._field.opacity() == pytest.approx(1.0)
     assert view._regions.opacity() == pytest.approx(0.0)
     view._user_zoom = 2.4
     view._lod_band = -1
@@ -598,7 +622,9 @@ def test_a_shared_point_stays_one_dot_with_a_count(qapp) -> None:
     assert len(piled) == 1
     assert set(piled[0]._stack_ids) == {1, 2}
     assert piled[0]._count.text() == "2"
-    assert piled[0]._count.isVisible()
+    assert not piled[0]._count.isVisible()
+    assert piled[0].pos().x() == pytest.approx(view._positions[1].x())
+    assert piled[0].pos().y() == pytest.approx(view._positions[2].y())
     ordered = view._order_stack([1, 2, 3])
     assert ordered[0] == 2
     assert ordered[1] == 1
@@ -797,7 +823,8 @@ def test_zooming_home_from_close_in_falls_back(qapp) -> None:
     view._user_zoom = 6.0
     view._lod_band = -1
     view._sync_live_stars(force=True)
-    assert view._field.opacity() < 0.5
+    assert view._field.opacity() > 0.5
+    assert view._regions.opacity() == pytest.approx(0.0)
     view.reset_view()
     assert view._falling
     assert view._field.opacity() == 1.0
@@ -1049,27 +1076,28 @@ def test_medium_zoom_draws_a_sharper_patch(qapp) -> None:
     assert view._near.isVisible()
     assert view._detail_name == "mid"
     assert view._detail_scale == NEAR_PATCH_SCALE
-    assert view._region_shown is view._region_fine
+    assert view._region_fine is None
+    assert view._region_shown is view._region_coarse
+    assert view._regions.opacity() == pytest.approx(coarse_line_opacity(2.0))
 
 
-def test_a_tighter_picture_replaces_the_mid_one(qapp) -> None:
+def test_the_sharper_patch_stays_through_the_medium_band(qapp) -> None:
     view = MoodMap()
     view.set_tracks(
         [_ranked(_track(1, valence=0.5, energy=0.5, mood_confidence=0.9))],
         None,
     )
     _settle_zoom(view, 2.3)
-    assert view._detail_name == "tight"
-    assert view._detail_scale > NEAR_PATCH_SCALE
+    assert view._detail_name == "mid"
+    assert view._detail_scale == NEAR_PATCH_SCALE
     assert view._near.isVisible()
     assert view._field.opacity() == pytest.approx(0.0)
     assert _patch_alpha(view, 1) > 20
-    tight = view._near.pixmap().cacheKey()
     _settle_zoom(view, 1.8)
     assert view._detail_name == "mid"
     assert view._detail_scale == NEAR_PATCH_SCALE
-    assert view._near.pixmap().cacheKey() != tight
     assert view._near.isVisible()
+    assert view._region_fine is None
 
 
 def test_a_long_pan_redraws_the_sharper_patch(qapp) -> None:
@@ -1103,7 +1131,8 @@ def test_close_zoom_and_search_drop_the_sharper_patch(qapp) -> None:
     assert view._field.opacity() == pytest.approx(0.0)
     _settle_zoom(view, 3.0)
     assert view._near.isVisible() is False
-    assert view._field.opacity() == pytest.approx(0.0)
+    assert view._field.opacity() == pytest.approx(1.0)
+    assert view._regions.opacity() == pytest.approx(0.0)
 
 
 def test_sliding_star_is_left_out_of_the_sharper_patch(qapp) -> None:
@@ -1199,3 +1228,196 @@ def test_a_pin_keeps_the_neighbor_glow(qapp) -> None:
     assert abs(after.red() - before.red()) <= 8
     assert abs(after.green() - before.green()) <= 8
     assert abs(after.blue() - before.blue()) <= 8
+
+
+def test_exact_spots_group_without_moving() -> None:
+    same = group_exact_spots([(1, 10.0, 10.0), (2, 10.2, 10.1), (3, 40.0, 40.0)])
+    assert sorted(len(group) for group in same) == [1, 2]
+    piled = next(group for group in same if len(group) == 2)
+    assert set(piled) == {1, 2}
+
+
+def test_zoom_ceiling_is_five_and_stars_do_not_move(qapp) -> None:
+    assert VIEW_ZOOM_MAX == 5.0
+    view = MoodMap()
+    view.show()
+    pinned = _track(1, title="Pin", valence=0.42, energy=0.61, pinned=True, mood_confidence=0.9)
+    left = _track(2, title="Left", valence=0.55, energy=0.45, mood_confidence=0.2)
+    right = _track(3, title="Right", valence=0.55, energy=0.45, mood_confidence=0.9)
+    loose = _track(4, title="Loose", valence=0.62, energy=0.52, mood_confidence=0.8)
+    view.set_tracks([_ranked(pinned), _ranked(left), _ranked(right), _ranked(loose)], None)
+    home = {tid: (pos.x(), pos.y()) for tid, pos in view._positions.items()}
+    moods = {tid: (item.track.valence, item.track.energy) for tid, item in view._ranked.items()}
+    _settle_zoom(view, 9.0)
+    assert view._user_zoom == pytest.approx(5.0)
+    for zoom in (1.0, 1.5, 2.0, 2.4, 2.6, 5.0):
+        _settle_zoom(view, zoom)
+        for tid, (x, y) in home.items():
+            pos = view._positions[tid]
+            assert pos.x() == pytest.approx(x)
+            assert pos.y() == pytest.approx(y)
+            assert (view._ranked[tid].track.valence, view._ranked[tid].track.energy) == moods[tid]
+            assert view._ranked[tid].track.pinned is (tid == 1)
+    _settle_zoom(view, 5.0)
+    visible = [star for star in view._stars.values() if star.isVisible()]
+    piled = [star for star in visible if set(star._stack_ids) == {2, 3}]
+    assert len(piled) == 1
+    assert piled[0].pos().x() == pytest.approx(home[2][0])
+    assert piled[0].pos().y() == pytest.approx(home[2][1])
+
+
+def test_coarse_lines_fade_across_the_medium_band(qapp) -> None:
+    view = MoodMap()
+    view.set_tracks([_ranked(_track(1, valence=0.5, energy=0.5))], None)
+    _settle_zoom(view, 1.2)
+    assert coarse_line_opacity(1.2) == pytest.approx(1.0)
+    assert view._regions.opacity() == pytest.approx(1.0)
+    assert view._region_fine is None
+    assert not view._hover_name.isVisible()
+    _settle_zoom(view, 2.0)
+    assert view._regions.opacity() == pytest.approx(0.5)
+    assert view._region_shown is view._region_coarse
+    assert view._region_fine is None
+    _settle_zoom(view, 2.4)
+    assert coarse_line_opacity(2.4) == pytest.approx(0.0)
+    assert view._regions.opacity() == pytest.approx(0.0)
+    assert view._region_fine is None
+
+
+def test_names_fade_in_as_the_count_fades(qapp) -> None:
+    view = MoodMap()
+    view.set_tracks(
+        [
+            _ranked(_track(1, title="Only", valence=0.5, energy=0.5, mood_confidence=0.9)),
+            _ranked(_track(2, title="Twin", valence=0.5, energy=0.5, mood_confidence=0.4)),
+        ],
+        None,
+    )
+    _settle_zoom(view, 2.4)
+    star = next(star for star in view._stars.values() if star.isVisible())
+    assert star._label.isVisible()
+    assert star._label.opacity() == pytest.approx(close_name_opacity(2.4))
+    assert star._label.opacity() < 0.5
+    assert star._role.isVisible()
+    assert star._count.isVisible()
+    assert star._count.opacity() == pytest.approx(1.0)
+    _settle_zoom(view, LOD_LABEL_START)
+    star = next(star for star in view._stars.values() if star.isVisible())
+    assert star._label.opacity() == pytest.approx(1.0)
+    assert star._role.opacity() == pytest.approx(1.0)
+    assert close_count_opacity(LOD_LABEL_START) == pytest.approx(0.0)
+    assert not star._count.isVisible()
+    assert star._role.text() in {"sure", "partial", "playing"}
+
+
+def test_medium_zoom_names_the_dot_and_a_pile_click_zooms(qapp) -> None:
+    view = MoodMap()
+    lone = _track(1, title="Solo Song", artist="Someone", valence=0.48, energy=0.52)
+    pile_a = _track(2, title="Pile A", valence=0.5, energy=0.5)
+    pile_b = _track(3, title="Pile B", valence=0.5, energy=0.5)
+    view.set_tracks([_ranked(lone), _ranked(pile_a), _ranked(pile_b)], None)
+    home = {tid: (view._positions[tid].x(), view._positions[tid].y()) for tid in view._positions}
+    _settle_zoom(view, 1.2)
+    view._pointer_scene = QPointF(view._positions[1])
+    view._sync_hover_name()
+    assert not view._hover_name.isVisible()
+    assert not view._stars_take_input()
+    _settle_zoom(view, 2.0)
+    view._pointer_scene = QPointF(view._positions[1])
+    view._sync_hover_name()
+    assert view._hover_name.isVisible()
+    assert view._hover_name.text() == "Solo Song"
+    assert not view._stars_take_input()
+    counts: list[int] = []
+    real = view._paint_spot_count
+
+    def wrapped(painter, pos, count, radius) -> None:
+        counts.append(count)
+        real(painter, pos, count, radius)
+
+    view._paint_spot_count = wrapped
+    view._rebuild_starfield()
+    assert 2 in counts
+    spot = view.mapFromScene(view._positions[2])
+    press = QMouseEvent(
+        QEvent.Type.MouseButtonPress,
+        QPointF(spot),
+        QPointF(spot),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    release = QMouseEvent(
+        QEvent.Type.MouseButtonRelease,
+        QPointF(spot),
+        QPointF(spot),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    view.mousePressEvent(press)
+    view.mouseReleaseEvent(release)
+    assert view._user_zoom >= LIVE_STARS_ZOOM
+    for tid, (x, y) in home.items():
+        assert view._positions[tid].x() == pytest.approx(x)
+        assert view._positions[tid].y() == pytest.approx(y)
+
+
+def test_wide_and_medium_stars_are_not_grabbable(qapp) -> None:
+    view = MoodMap()
+    view.set_tracks([_ranked(_track(1, valence=0.5, energy=0.5))], None)
+    for zoom in (1.2, 2.0):
+        _settle_zoom(view, zoom)
+        pos = QPointF(view._positions[1])
+        spot = view.mapFromScene(pos)
+        view.mousePressEvent(
+            QMouseEvent(
+                QEvent.Type.MouseButtonPress,
+                QPointF(spot),
+                QPointF(spot),
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+        )
+        moved = QPointF(spot.x() + 36, spot.y() + 12)
+        view.mouseMoveEvent(
+            QMouseEvent(
+                QEvent.Type.MouseMove,
+                moved,
+                moved,
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+        )
+        assert view._sky_hold_id is None
+        assert view._positions[1].x() == pytest.approx(pos.x())
+        assert view._positions[1].y() == pytest.approx(pos.y())
+        view.mouseReleaseEvent(
+            QMouseEvent(
+                QEvent.Type.MouseButtonRelease,
+                moved,
+                moved,
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.NoButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+        )
+        assert not view._stars_take_input()
+
+
+def test_live_stars_stay_on_the_lens_and_the_edge_stays_a_picture(qapp) -> None:
+    view = MoodMap()
+    view.show()
+    center = _track(1, title="Center", valence=0.5, energy=0.5, mood_confidence=0.9)
+    edge = _track(2, title="Edge", valence=0.57, energy=0.5, mood_confidence=0.9)
+    view.set_tracks([_ranked(center), _ranked(edge)], None)
+    view.set_lens(0.5, 0.5, 0.05)
+    _settle_zoom(view, 5.0)
+    assert 1 in view._stars
+    assert 2 not in view._stars
+    assert view._field.opacity() == pytest.approx(1.0)
+    assert view._regions.opacity() == pytest.approx(0.0)
+    assert view._stars_take_input()
+    assert view._stars[1]._role.isVisible()

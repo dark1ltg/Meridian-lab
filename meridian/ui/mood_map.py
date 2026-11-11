@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from meridian.context import LENS_RADIUS_DEFAULT, LENS_RADIUS_MAX, LENS_RADIUS_MIN
-from meridian.queue_engine import QUADRANT_TITLE, Quadrant, RankedTrack
+from meridian.queue_engine import Quadrant, RankedTrack
 from meridian.ui.fonts import sans
 from meridian.features import CONFIDENCE_HIGH, CONFIDENCE_LOW, read_mood_confidence, track_is_unplaced
 from meridian.ui.palette import (
@@ -380,18 +380,17 @@ def constellation_bin_image(
 
 # View magnification on top of fit-to-widget (1 = whole night sky).
 VIEW_ZOOM_MIN = 1.0
-VIEW_ZOOM_MAX = 14.0
+VIEW_ZOOM_MAX = 5.0
 VIEW_WHEEL_FACTOR = 1.06
 VIEW_NATIVE_OUTLIER = 1.25
-# Below this zoom, stars are one baked texture (smooth pinch). Above: live items in view.
+# Below this zoom, stars are one baked texture (smooth pinch). Above: live items.
 LIVE_STARS_ZOOM = 2.4
 # The baked pile fades across this gap as the clickable stars take over.
 PILE_FADE_START = 2.0
 # From here until the live stars, one sharper picture of the patch on screen.
+# It stays that one picture. A tighter replacement is not drawn.
 # Built after the pinch stops. A pinch from farther out keeps the wide picture.
 # A pinch that starts up close keeps the clickable stars, so the sky does not go blank.
-# Only one detail picture is kept: the mid one, or a tighter one just before
-# the clickable stars. The other is thrown away.
 NEAR_PATCH_ZOOM = 1.6
 NEAR_PATCH_SCALE = 4        # pixels per scene unit; the wide bake is FIELD_SCALE
 NEAR_PATCH_MARGIN = 0.35    # extra around the view so a short pan reuses the picture
@@ -399,8 +398,8 @@ NEAR_PATCH_MARGIN = 0.35    # extra around the view so a short pan reuses the pi
 PATCH_QUERY_PAD = 36.0
 # A pin or the song that starts playing updates those stars. More than this redraws the sky.
 APPEARANCE_STAMP_MAX = 8
-DETAIL_TIGHT_ZOOM = 2.2
-DETAIL_TIGHT_SCALE = 6
+# Names arrive with the live stars, dim here and readable by LOD_LABEL_START.
+NAME_DIM = 0.36
 LOD_LABEL_START = 2.6
 LOD_GLOW_START = 2.4
 # Wide-sky furniture (weather, cross, axis labels, constellations) is gone
@@ -410,8 +409,7 @@ LOD_CHROME_FADE_END = LIVE_STARS_ZOOM
 CLUSTER_PULL = 0.42
 CLUSTER_GRID = 48.0
 LOD_DEFER_MS = 48
-LABEL_CAP = 48
-LIVE_STAR_CAP = 220          # max interactive stars while zoomed in
+LIVE_STAR_CAP = 220          # max interactive stars on the cluster under the lens
 # Songs closer than this share one dot. Zoom cannot pull an exact overlap apart.
 STACK_POINT = 1.0
 # A halo this close to this many other songs is what turns a pile into fog.
@@ -423,7 +421,8 @@ CROWD_BODY = 0.42
 FIELD_SCALE = 2              # bake retina-ish starfield
 SCENE_W = 800
 SCENE_H = 600
-# Neighborhood tiles. Coarse on the whole sky, finer only after the dive.
+# Neighborhood tiles. Coarse lines on the wide sky. They fade across the medium
+# zoom and are gone up close. The finer lines are not drawn.
 # A cell is a group of songs, so the white pile breaks into areas instead of slivers.
 REGION_COARSE_SPAN = 20.0
 REGION_COARSE_COUNT = 14
@@ -436,6 +435,100 @@ HIT_RADIUS_SKY = 14.0
 # Tighter than hover/snap — avoids turning a nearby pan into an accidental pin.
 HIT_RADIUS_SKY_GRAB = 7.0
 SKY_DRAG_SLOP = 8.0
+
+
+def coarse_line_opacity(zoom: float) -> float:
+    """Coarse neighborhood lines. Full below the medium zoom, gone at the live stars."""
+    if zoom <= NEAR_PATCH_ZOOM:
+        return 1.0
+    if zoom >= LIVE_STARS_ZOOM:
+        return 0.0
+    return 1.0 - (zoom - NEAR_PATCH_ZOOM) / (LIVE_STARS_ZOOM - NEAR_PATCH_ZOOM)
+
+
+def close_name_opacity(zoom: float) -> float:
+    """Names come in with the live stars: dim at 2.4×, readable by 2.6×."""
+    if zoom < LIVE_STARS_ZOOM:
+        return 0.0
+    if zoom >= LOD_LABEL_START:
+        return 1.0
+    span = LOD_LABEL_START - LIVE_STARS_ZOOM
+    t = (zoom - LIVE_STARS_ZOOM) / span
+    return NAME_DIM + (1.0 - NAME_DIM) * t
+
+
+def close_count_opacity(zoom: float) -> float:
+    """The pile count is solid through the medium zoom, then fades as stars appear."""
+    if zoom <= LIVE_STARS_ZOOM:
+        return 1.0
+    if zoom >= LOD_LABEL_START:
+        return 0.0
+    span = LOD_LABEL_START - LIVE_STARS_ZOOM
+    return 1.0 - (zoom - LIVE_STARS_ZOOM) / span
+
+
+def short_star_name(track: object) -> str:
+    """The song title only. Artist and album stay in the lists and the bar."""
+    title = getattr(track, "short_title", None)
+    if not title:
+        label = str(getattr(track, "label", "") or "")
+        title = label.split(" — ", 1)[-1] if label else ""
+    title = str(title).strip() or "song"
+    if len(title) > 28:
+        return title[:27] + "…"
+    return title
+
+
+def star_caption(track: object, *, playing: bool) -> str:
+    """One short line under a close star. Not a card."""
+    if playing:
+        return "playing"
+    if bool(getattr(track, "pinned", False)):
+        return "pinned"
+    note = str(getattr(track, "confidence_note", "") or "").lower()
+    if "no listen" in note:
+        return "no listen"
+    conf = read_mood_confidence(track)
+    if conf >= CONFIDENCE_HIGH:
+        return "sure"
+    if conf >= CONFIDENCE_LOW:
+        return "partial"
+    return "unsure"
+
+
+def group_exact_spots(points: list[tuple[int, float, float]]) -> list[list[int]]:
+    """Group songs that already share a spot. Positions are not moved."""
+    cell = STACK_POINT
+    buckets: dict[tuple[int, int], list[tuple[int, float, float, int]]] = {}
+    order: list[tuple[int, int]] = []
+    for index, (tid, x, y) in enumerate(points):
+        key = (int(x // cell), int(y // cell))
+        if key not in buckets:
+            buckets[key] = []
+            order.append(key)
+        buckets[key].append((tid, x, y, index))
+    groups: list[list[int]] = []
+    placed: dict[tuple[int, int], list[tuple[float, float, int]]] = {}
+    for key in order:
+        for tid, x, y, _index in buckets[key]:
+            joined: int | None = None
+            for nx in (key[0] - 1, key[0], key[0] + 1):
+                for ny in (key[1] - 1, key[1], key[1] + 1):
+                    for gx, gy, gi in placed.get((nx, ny), ()):
+                        if hypot(gx - x, gy - y) <= STACK_POINT:
+                            joined = gi
+                            break
+                    if joined is not None:
+                        break
+                if joined is not None:
+                    break
+            if joined is None:
+                joined = len(groups)
+                groups.append([tid])
+                placed.setdefault(key, []).append((x, y, joined))
+            else:
+                groups[joined].append(tid)
+    return groups
 
 
 def _span_of(chunk: np.ndarray) -> float:
@@ -805,6 +898,7 @@ class TrackStar(QGraphicsEllipseItem):
     def set_stack(self, ids: list[int]) -> None:
         """One dot for songs that share a point, with a count when there is more than one."""
         self._stack_ids = list(ids)
+        self._lod_key = (-1,)
         if len(self._stack_ids) < 2:
             self._count.hide()
             return
@@ -911,18 +1005,8 @@ class TrackStar(QGraphicsEllipseItem):
             self._pin_ring.hide()
             self._pin_head.hide()
 
-        tip = f"{ranked.track.label}\n{ranked.quadrant.value.upper()}"
-        tip += f"\nconfidence {conf:.2f}"
-        if pinned:
-            tip += " — pinned (locked by you)"
-        elif band == "low":
-            tip += " — weak guess"
-        elif band == "mid":
-            tip += " — partial evidence"
-        note = (getattr(ranked.track, "confidence_note", "") or "").strip()
-        if note:
-            tip += f"\n{note}"
-        self.setToolTip(tip)
+        # The name and one line are drawn on the star. No hover card.
+        self.setToolTip("")
 
         glow_r = r * (3.8 if pinned else 3.4) * (1.0 + 0.55 * haze)
         glow_c = QColor(color)
@@ -935,20 +1019,13 @@ class TrackStar(QGraphicsEllipseItem):
         self._glow.setRect(-glow_r, -glow_r, glow_r * 2, glow_r * 2)
         self._glow.setBrush(QBrush(glow_c))
 
-        title = ranked.track.label
-        if " — " in title:
-            title = title.split(" — ", 1)[-1]
-        if len(title) > 28:
-            title = title[:27] + "…"
-        self._label.setText(title)
-        role = QUADRANT_TITLE[ranked.quadrant]
-        self._role.setText(role)
-        role_box = self._role.boundingRect()
-        self._role.setPos(-role_box.width() / 2, r + (8 if pinned else 3))
-        role_ink = QColor(PLAYLIST_QCOLOR[ranked.quadrant])
-        self._role.setBrush(QBrush(role_ink))
+        self._label.setText(short_star_name(ranked.track))
+        self._role.setText(star_caption(ranked.track, playing=current))
         br = self._label.boundingRect()
-        self._label.setPos(-br.width() / 2, r + role_box.height() + (6 if pinned else 2))
+        self._label.setPos(-br.width() / 2, r + (8 if pinned else 3))
+        role_box = self._role.boundingRect()
+        self._role.setPos(-role_box.width() / 2, r + br.height() + (6 if pinned else 2))
+        self._role.setBrush(QBrush(QColor("#d5dbe8")))
         if inside:
             label_ink = QColor(PLAYLIST_QCOLOR[ranked.quadrant])
             if current or pinned:
@@ -970,9 +1047,17 @@ class TrackStar(QGraphicsEllipseItem):
             return False
         return self._map.star_in_lens(pos)
 
-    def set_lod(self, glow_a: float, label_on: bool) -> None:
+    def set_lod(
+        self,
+        glow_a: float,
+        label_on: bool,
+        name_opacity: float = 1.0,
+        count_opacity: float = 1.0,
+    ) -> None:
         show_glow = glow_a > 0.02
-        key = (int(glow_a * 20), show_glow, label_on)
+        name_step = int(round(name_opacity * 20))
+        count_step = int(round(count_opacity * 20))
+        key = (int(glow_a * 20), show_glow, label_on, name_step, count_step, self._role.text())
         if key == self._lod_key:
             return
         self._lod_key = key
@@ -981,12 +1066,19 @@ class TrackStar(QGraphicsEllipseItem):
             self._glow.show()
         else:
             self._glow.hide()
-        if label_on:
+        if label_on and name_opacity > 0.02:
+            self._label.setOpacity(name_opacity)
+            self._role.setOpacity(name_opacity)
             self._label.show()
             self._role.show()
         else:
             self._label.hide()
             self._role.hide()
+        if len(self._stack_ids) > 1 and count_opacity > 0.02:
+            self._count.setOpacity(count_opacity)
+            self._count.show()
+        elif len(self._stack_ids) > 1:
+            self._count.hide()
 
     def hoverEnterEvent(self, event) -> None:
         self._hovering = True
@@ -1270,6 +1362,12 @@ class MoodMap(QGraphicsView):
         self.lens.setPos(420, 300)
         self.lens._map = self
         self._apply_lens_rect()
+        self._hover_name = self._scene.addSimpleText("", sans(10))
+        self._hover_name.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+        self._hover_name.setBrush(QBrush(QColor("#e8ecf7")))
+        self._hover_name.setZValue(35)
+        self._hover_name.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self._hover_name.hide()
 
     def _enable_opengl_viewport(self) -> bool:
         import os
@@ -1548,14 +1646,15 @@ class MoodMap(QGraphicsView):
         self._hide_close_smear()
 
     def _hide_close_smear(self) -> None:
-        """Up close, drop the faded pile and the tile lines so the live stars stand alone."""
+        """Up close the lines are gone. The wide picture stays, so the edges still read."""
         if self._user_zoom < LIVE_STARS_ZOOM or self._zoom_active or self._falling:
             return
-        self._field.setOpacity(0.0)
         self._regions.setOpacity(0.0)
         self._links.setOpacity(0.0)
         self._bins.setOpacity(0.0)
         self._lens_color.setOpacity(0.0)
+        if not self._search_query:
+            self._field.setOpacity(1.0)
 
     def set_playing(self, playing: bool) -> None:
         """The heartbeat follows sound, not merely which song is loaded."""
@@ -2112,15 +2211,7 @@ class MoodMap(QGraphicsView):
                 painter.setBrush(QBrush(QColor(176, 156, 220, alpha)))
                 radius = 4.0 + min(10.0, count * 0.05)
                 painter.drawEllipse(center, radius, radius)
-        easing_id = self._listen_ease[0] if self._listen_ease is not None else None
-        painter.setPen(Qt.PenStyle.NoPen)
-        for item in order:
-            if item.track.id == easing_id:
-                continue
-            pos = self._positions.get(item.track.id)
-            if pos is None:
-                continue
-            self._paint_baked_star(painter, item, pos, density)
+        self._paint_spots(painter, order, density, None)
         painter.end()
         self._field.setPixmap(QPixmap.fromImage(image))
         # The sharper picture is of this same sky. It redraws from the grid.
@@ -2178,8 +2269,37 @@ class MoodMap(QGraphicsView):
                 painter.setBrush(QBrush(QColor(176, 156, 220, alpha)))
                 radius = 4.0 + min(10.0, count * 0.05)
                 painter.drawEllipse(center, radius, radius)
+        self._paint_spots(painter, order, density_mode, reach)
+
+    def _spot_face(self, ids: list[int]) -> int:
+        """Which song draws the shared dot. Playing, then a pin, then the usual order."""
+        ordered = self._order_stack(ids)
+        for tid in ordered:
+            if tid == self._current_id:
+                return tid
+        for tid in ordered:
+            item = self._ranked.get(tid)
+            if item is not None and item.track.pinned:
+                return tid
+        return ordered[0]
+
+    def _paint_spot_count(self, painter: QPainter, pos: QPointF, count: int, radius: float) -> None:
+        text = str(count) if count < 100 else "99+"
+        painter.setFont(sans(11, medium=True))
+        painter.setPen(QColor(247, 244, 255, 235))
+        painter.drawText(QPointF(pos.x() + radius + 1.2, pos.y() - radius * 0.15), text)
+
+    def _paint_spots(
+        self,
+        painter: QPainter,
+        order: list[RankedTrack],
+        density: bool,
+        reach: QRectF | None,
+    ) -> None:
+        """One dot per exact spot, with a count when several songs share it."""
         easing_id = self._listen_ease[0] if self._listen_ease is not None else None
-        painter.setPen(Qt.PenStyle.NoPen)
+        points: list[tuple[int, float, float]] = []
+        by_id: dict[int, RankedTrack] = {}
         for item in order:
             if item.track.id == easing_id:
                 continue
@@ -2188,7 +2308,23 @@ class MoodMap(QGraphicsView):
                 continue
             if reach is not None and not reach.contains(pos):
                 continue
-            self._paint_baked_star(painter, item, pos, density_mode)
+            by_id[item.track.id] = item
+            points.append((item.track.id, pos.x(), pos.y()))
+        if not points:
+            return
+        painter.setPen(Qt.PenStyle.NoPen)
+        for ids in group_exact_spots(points):
+            rep = self._spot_face(ids)
+            item = by_id.get(rep)
+            if item is None:
+                continue
+            pos = self._positions.get(rep)
+            if pos is None:
+                continue
+            self._paint_baked_star(painter, item, pos, density)
+            if len(ids) > 1:
+                radius, _color, _bloom = self._night_star(item, density)
+                self._paint_spot_count(painter, pos, len(ids), radius)
 
     def _rebuild_starfield(self) -> None:
         """Bake every track into one pixmap — pinch then only scales this texture."""
@@ -2226,12 +2362,10 @@ class MoodMap(QGraphicsView):
         return self.mapToScene(self.viewport().rect()).boundingRect()
 
     def _detail_choice(self) -> tuple[str, int] | None:
-        """Which one cached picture this zoom wants. None keeps the wide sky."""
+        """The one sharper picture. It stays through the medium zoom."""
         zoom = self._user_zoom
         if zoom < NEAR_PATCH_ZOOM or zoom >= LIVE_STARS_ZOOM:
             return None
-        if zoom >= DETAIL_TIGHT_ZOOM:
-            return ("tight", DETAIL_TIGHT_SCALE)
         return ("mid", NEAR_PATCH_SCALE)
 
     def _near_patch_active(self) -> bool:
@@ -2388,11 +2522,17 @@ class MoodMap(QGraphicsView):
         self._regions.setPos(0, 0)
         self._regions.setVisible(True)
 
-    def _ensure_regions(self) -> None:
-        """Neighborhood tiles from the same places as the stars.
+    def _apply_region_opacity(self, zoom: float | None = None) -> None:
+        """Coarse lines fade from 1.6× to 2.4×. Search keeps its own veil."""
+        if self._search_query:
+            return
+        level = self._user_zoom if zoom is None else zoom
+        self._regions.setOpacity(coarse_line_opacity(level))
 
-        The coarse picture is the wide sky. The finer one is built the first
-        time a zoom can show it, then kept. A fall does not swap pictures.
+    def _ensure_regions(self) -> None:
+        """Coarse neighborhood lines from the same places as the stars.
+
+        The finer lines are not drawn. A fall does not swap the picture.
         """
         key = self._region_position_key()
         if key != self._region_pos_key:
@@ -2407,12 +2547,7 @@ class MoodMap(QGraphicsView):
             return
         if self._region_coarse is None:
             self._region_coarse = self._region_pixmap(fine=False)
-        show_fine = self._user_zoom >= NEAR_PATCH_ZOOM and not self._zoom_active
-        if show_fine and self._region_fine is None:
-            self._region_fine = self._region_pixmap(fine=True)
-        self._show_region_pixmap(
-            self._region_fine if show_fine and self._region_fine is not None else self._region_coarse
-        )
+        self._show_region_pixmap(self._region_coarse)
 
     def _night_star(self, item: RankedTrack, density: bool) -> tuple[float, QColor, int]:
         """Scene-pixel radius, quiet-sky color, and bloom alpha for one baked star."""
@@ -2795,6 +2930,7 @@ class MoodMap(QGraphicsView):
             self._apply_search_veil()
         else:
             self._update_chrome(self._user_zoom)
+            self._apply_region_opacity(zoom)
 
     def _present_home_sky(self) -> None:
         """Show the whole baked sky while zooming home, so the end does not blink."""
@@ -2806,11 +2942,12 @@ class MoodMap(QGraphicsView):
             star.hide()
             star.set_stack([])
         self._field.setOpacity(1.0)
-        self._regions.setOpacity(1.0)
         self._lens_color.setOpacity(1.0)
         self._route.setOpacity(1.0)
         self._hide_near_patch()
+        self._hover_name.hide()
         self._ensure_regions()
+        self._apply_region_opacity()
         self._update_chrome(self._user_zoom)
         self._apply_search_veil()
 
@@ -2910,17 +3047,19 @@ class MoodMap(QGraphicsView):
         through cannot be dragged.
         """
         fade = self._pile_fade()
+        lines = coarse_line_opacity(self._user_zoom)
         if self._zoom_held_live:
             self._hold_pinch_stars(self._user_zoom)
             strength = 1.0 if self._user_zoom >= LIVE_STARS_ZOOM else max(0.0, 1.0 - fade)
             self._set_star_strength(strength)
             self._hide_near_patch()
             if self._user_zoom >= LIVE_STARS_ZOOM:
-                self._field.setOpacity(0.0)
+                if not self._search_query:
+                    self._field.setOpacity(1.0)
                 self._regions.setOpacity(0.0)
             else:
                 self._field.setOpacity(fade)
-                self._regions.setOpacity(fade)
+                self._regions.setOpacity(lines)
         elif fade >= 0.999:
             self._show_wide_stars()
             locked = self._drag_locked_ids()
@@ -2928,17 +3067,18 @@ class MoodMap(QGraphicsView):
                 if tid not in locked:
                     star.hide()
             self._field.setOpacity(1.0)
-            self._regions.setOpacity(1.0)
+            self._regions.setOpacity(lines)
         else:
             self._show_wide_stars()
             self._hold_pinch_stars(self._user_zoom)
             self._set_star_strength(1.0 - fade)
             self._field.setOpacity(fade)
-            self._regions.setOpacity(fade)
+            self._regions.setOpacity(lines)
             self._hide_near_patch()
         if not self._sky_has_a_picture():
             self._field.setOpacity(1.0)
-            self._regions.setOpacity(1.0)
+            self._regions.setOpacity(0.0 if self._user_zoom >= LIVE_STARS_ZOOM else lines)
+        self._hover_name.hide()
 
     def _end_zoom_interaction(self) -> None:
         self._zoom_active = False
@@ -3030,16 +3170,16 @@ class MoodMap(QGraphicsView):
         return self._order_stack(ids)[0]
 
     def _close_groups(self, locked: set[int]) -> list[list[int]]:
-        """Songs in view, nearest the pointer first. Exact overlaps become one group."""
-        focus = self._live_focus()
+        """The cluster under the lens. Exact overlaps stay one group. Nothing is moved."""
+        focus = self.lens.pos()
         vis = self.mapToScene(self.viewport().rect()).boundingRect()
-        vis.adjust(-60, -60, 60, 60)
         scored: list[tuple[float, int, QPointF]] = []
         for tid, pos in self._positions.items():
-            if not vis.contains(pos) and tid not in locked:
-                continue
             item = self._ranked.get(tid)
             if item is None:
+                continue
+            in_cluster = self.star_in_lens(pos) and vis.contains(pos)
+            if not in_cluster and tid not in locked:
                 continue
             scored.append((self._live_priority(tid, item, pos, focus, locked), tid, pos))
         scored.sort(key=lambda row: row[0], reverse=True)
@@ -3159,8 +3299,9 @@ class MoodMap(QGraphicsView):
             glow_a = 0.0
         else:
             glow_a = min(1.0, (zoom - LOD_GLOW_START) / 2.4)
-        labels_on = zoom >= LOD_LABEL_START
-        labeled = 0
+        labels_on = zoom >= LIVE_STARS_ZOOM
+        name_opacity = close_name_opacity(zoom)
+        count_opacity = close_count_opacity(zoom)
         used: list[TrackStar] = []
         for ids in groups:
             rep = self._stack_representative(ids)
@@ -3189,11 +3330,12 @@ class MoodMap(QGraphicsView):
                 star.setPos(self._positions[rep])
             star.set_body_scale(body, hot=star._search_hot)
             star.show()
-            show_label = False
-            if labels_on and labeled < LABEL_CAP:
-                show_label = True
-                labeled += 1
-            star.set_lod(glow_a if self._keeps_glow(rep, item) else 0.0, show_label)
+            star.set_lod(
+                glow_a if self._keeps_glow(rep, item) else 0.0,
+                labels_on,
+                name_opacity,
+                count_opacity,
+            )
             used.append(star)
         for tid in list(self._stars):
             if self._stars[tid] not in used:
@@ -3228,12 +3370,13 @@ class MoodMap(QGraphicsView):
                 else:
                     star.hide()
             self._field.setOpacity(1.0)
-            self._regions.setOpacity(1.0)
             self._lens_color.setOpacity(1.0)
             self._route.setOpacity(1.0)
             self._ensure_regions()
+            self._apply_region_opacity(zoom)
             self._apply_search_veil()
             self._sync_near_patch()
+            self._sync_hover_name()
             return
 
         self._place_live_stars(zoom)
@@ -3242,6 +3385,7 @@ class MoodMap(QGraphicsView):
         self._apply_search_veil()
         self._hide_close_smear()
         self._sync_near_patch()
+        self._sync_hover_name()
 
     def _anchor_point(self, view_pos: QPoint | QPointF) -> QPoint:
         return view_pos.toPoint() if isinstance(view_pos, QPointF) else QPoint(view_pos)
@@ -3279,15 +3423,58 @@ class MoodMap(QGraphicsView):
         )
         return self.mapFromScene(focus)
 
-    def _set_zoom_target(self, zoom: float, view_pos: QPoint | QPointF) -> None:
+    def _ids_on_spot(self, tid: int) -> list[int]:
+        pos = self._positions.get(tid)
+        if pos is None:
+            return []
+        points = [(other, point.x(), point.y()) for other, point in self._positions.items()]
+        for group in group_exact_spots(points):
+            if tid in group:
+                return group
+        return [tid]
+
+    def _zoom_into_pile(self, tid: int) -> None:
+        """A piled dot in the medium band opens toward the live stars. Songs stay put."""
+        pos = self._positions.get(tid)
+        if pos is None:
+            return
+        target = min(VIEW_ZOOM_MAX, max(LIVE_STARS_ZOOM, self._user_zoom * 1.5))
+        self._set_zoom_target(target, self.mapFromScene(pos), pull=False)
+        self._flush_zoom_lod()
+
+    def _sync_hover_name(self) -> None:
+        """A short name on the dot under the pointer, only in the medium band."""
+        zoom = self._user_zoom
+        if (
+            zoom < NEAR_PATCH_ZOOM
+            or zoom >= LIVE_STARS_ZOOM
+            or self._zoom_active
+            or self._falling
+            or self._search_query
+            or self._pointer_scene is None
+        ):
+            self._hover_name.hide()
+            return
+        tid = self._nearest_track_id(self._pointer_scene, HIT_RADIUS_SKY)
+        item = self._ranked.get(tid) if tid is not None else None
+        pos = self._positions.get(tid) if tid is not None else None
+        if item is None or pos is None:
+            self._hover_name.hide()
+            return
+        self._hover_name.setText(short_star_name(item.track))
+        box = self._hover_name.boundingRect()
+        self._hover_name.setPos(pos.x() - box.width() / 2.0, pos.y() + 8.0)
+        self._hover_name.show()
+
+    def _set_zoom_target(self, zoom: float, view_pos: QPoint | QPointF, *, pull: bool = True) -> None:
         if self._falling:
             self._falling = False
             self._fall_timer.stop()
         self._begin_zoom_interaction()
         self._zoom_target = max(VIEW_ZOOM_MIN, min(VIEW_ZOOM_MAX, zoom))
         anchor = self._anchor_point(view_pos)
-        # Cluster pull once per gesture — not every native tick.
-        if self._cluster_once and self._zoom_target > self._user_zoom + 1e-4:
+        # Cluster pull once per gesture — not every native tick. It does not move stars.
+        if pull and self._cluster_once and self._zoom_target > self._user_zoom + 1e-4:
             anchor = self._cluster_anchor(anchor)
             self._cluster_once = False
         self._zoom_anchor = anchor
@@ -3491,8 +3678,33 @@ class MoodMap(QGraphicsView):
         self._show_wide_stars()
         super().mousePressEvent(event)
 
+    def _pile_under_press(self, scene_pt: QPointF) -> int | None:
+        """A piled dot in the medium band. The lens must not swallow that click."""
+        if self._zoom_active or self._falling:
+            return None
+        if not (NEAR_PATCH_ZOOM <= self._user_zoom < LIVE_STARS_ZOOM):
+            return None
+        tid = self._nearest_track_id(scene_pt, HIT_RADIUS_SKY)
+        if tid is None or tid not in self._ranked:
+            return None
+        if len(self._ids_on_spot(tid)) < 2:
+            return None
+        return tid
+
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            scene_pt = self.mapToScene(event.position().toPoint())
+            pile_id = self._pile_under_press(scene_pt)
+            if pile_id is not None:
+                self._sky_candidate_id = pile_id
+                self._sky_press_scene = QPointF(scene_pt)
+                self._sky_hold_id = None
+                self._sky_dragged = False
+                self._sky_defer_pan = True
+                self._cancel_pending_snap()
+                self.track_hovered.emit(self._ranked[pile_id].track.label)
+                event.accept()
+                return
             item = self.itemAt(event.position().toPoint())
             # Below the close view a painted star is not something you can drag away.
             if self._track_star_from_item(item) is not None and not self._stars_take_input():
@@ -3557,8 +3769,16 @@ class MoodMap(QGraphicsView):
             self._sky_candidate_id = None
             self._sky_defer_pan = False
             self._finish_hand_drag(event)
-            if star is not None and dragged:
+            if star is not None and dragged and self._user_zoom >= LIVE_STARS_ZOOM:
                 self.star_moved(star)
+            elif (
+                not dragged
+                and candidate is not None
+                and candidate in self._ranked
+                and NEAR_PATCH_ZOOM <= self._user_zoom < LIVE_STARS_ZOOM
+                and len(self._ids_on_spot(candidate)) > 1
+            ):
+                self._zoom_into_pile(candidate)
             elif not dragged and candidate is not None and candidate in self._ranked:
                 # Defer snap so a double-click empty can cancel it.
                 self._pending_snap_id = candidate
@@ -3600,6 +3820,8 @@ class MoodMap(QGraphicsView):
 
     def mouseMoveEvent(self, event) -> None:
         self._pointer_scene = self.mapToScene(event.position().toPoint())
+        if not (event.buttons() & Qt.MouseButton.LeftButton):
+            self._sync_hover_name()
         if (
             self._user_zoom >= LIVE_STARS_ZOOM
             and not self._falling
@@ -3607,7 +3829,7 @@ class MoodMap(QGraphicsView):
             and not event.buttons()
         ):
             self._pointer_timer.start()
-        # Sky: convert a core-star press into drag-to-pin without a prior pan nudge.
+        # Below the close view a star is not grabbable. A move pans the sky.
         if (
             self._user_zoom < LIVE_STARS_ZOOM
             and self._sky_hold_id is None
@@ -3618,36 +3840,6 @@ class MoodMap(QGraphicsView):
             pos = self.mapToScene(event.position().toPoint())
             delta = pos - self._sky_press_scene
             if hypot(delta.x(), delta.y()) > SKY_DRAG_SLOP:
-                star_pos = self._positions.get(self._sky_candidate_id)
-                grab = (
-                    self._sky_defer_pan
-                    or (
-                        star_pos is not None
-                        and hypot(
-                            self._sky_press_scene.x() - star_pos.x(),
-                            self._sky_press_scene.y() - star_pos.y(),
-                        )
-                        <= HIT_RADIUS_SKY_GRAB
-                    )
-                )
-                if grab:
-                    star = self._ensure_interactive_star(self._sky_candidate_id)
-                    if star is not None:
-                        if self._hand_drag_armed or self._panning:
-                            self._finish_hand_drag(event)
-                        self._sky_defer_pan = False
-                        self._sky_hold_id = self._sky_candidate_id
-                        self._sky_dragged = True
-                        star.setPos(
-                            QPointF(
-                                max(40.0, min(760.0, pos.x())),
-                                max(36.0, min(560.0, pos.y())),
-                            )
-                        )
-                        self._update_drag_position(self._sky_hold_id, star.pos())
-                        event.accept()
-                        return
-                # Far from star core → pure pan; drop candidate so release won't snap.
                 self._sky_candidate_id = None
                 self._sky_defer_pan = False
                 if not self._hand_drag_armed and not self._panning:
@@ -3656,7 +3848,11 @@ class MoodMap(QGraphicsView):
             elif self._sky_defer_pan:
                 event.accept()
                 return
-        if self._sky_hold_id is not None and event.buttons() & Qt.MouseButton.LeftButton:
+        if (
+            self._sky_hold_id is not None
+            and self._user_zoom >= LIVE_STARS_ZOOM
+            and event.buttons() & Qt.MouseButton.LeftButton
+        ):
             star = self._stars.get(self._sky_hold_id)
             if star is not None:
                 pos = self.mapToScene(event.position().toPoint())

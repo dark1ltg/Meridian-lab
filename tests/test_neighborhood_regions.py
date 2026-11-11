@@ -167,7 +167,7 @@ def test_daytime_softens_tile_lines_and_a_pin_is_not_sliced() -> None:
     assert not (int(spared_px[y, x, 0]) < 80 and int(spared_px[y, x, 3]) > 160)
 
 
-def test_lens_move_reuses_tiles_and_a_dive_uses_finer_ones(qapp) -> None:
+def test_lens_move_reuses_coarse_lines_and_a_dive_does_not_refine_them(qapp) -> None:
     sky = MoodMap()
     sky.resize(960, 720)
     tracks = [
@@ -183,17 +183,23 @@ def test_lens_move_reuses_tiles_and_a_dive_uses_finer_ones(qapp) -> None:
     assert sky._region_fine is None
     sky.set_lens(0.2, 0.8, 0.12)
     assert sky._region_coarse is coarse
+    sky._user_zoom = 2.0
+    sky._ensure_regions()
+    sky._apply_region_opacity()
+    assert sky._region_fine is None
+    assert sky._regions.pixmap().cacheKey() == coarse.cacheKey()
+    assert sky._regions.opacity() == pytest.approx((2.4 - 2.0) / (2.4 - 1.6))
     sky._user_zoom = 2.6
     sky._ensure_regions()
-    assert sky._region_fine is not None
-    assert sky._regions.pixmap().cacheKey() != coarse.cacheKey()
+    assert sky._region_fine is None
+    assert sky._regions.pixmap().cacheKey() == coarse.cacheKey()
     sky.set_search_query("zzz-no-match")
     assert sky._regions.opacity() == pytest.approx(0.0)
     sky.set_search_query("")
     sky._lod_band = -1
     sky._sync_live_stars(force=True)
     assert sky._regions.opacity() == pytest.approx(0.0)
-    assert sky._region_fine is not None
+    assert sky._region_fine is None
     assert sky._links.zValue() > sky._regions.zValue()
     calls: list[object] = []
     sky._regions.setPixmap = lambda pix: calls.append(pix)

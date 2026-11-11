@@ -987,7 +987,8 @@ def check_mood_map_helpers() -> None:
     pin_star = TrackStar(pinned_ranked)
     assert pin_star._pin_ring.isVisible()
     assert pin_star._pin_head.isVisible()
-    assert "pinned" in (pin_star.toolTip() or "").lower()
+    assert pin_star.toolTip() == ""
+    assert pin_star._role.text() == "pinned"
     assert pin_star.opacity() == 1.0, "pins stay full-bright even if stored conf is low"
 
     weak_track = SimpleNamespace(
@@ -1014,7 +1015,8 @@ def check_mood_map_helpers() -> None:
         return (a.red() - b.red()) ** 2 + (a.green() - b.green()) ** 2 + (a.blue() - b.blue()) ** 2
 
     assert _rgb_dist(fill, LOW_TRUST_QCOLOR) < _rgb_dist(fill, PLAYLIST_QCOLOR[Quadrant.SHELF])
-    assert "weak guess" in (weak_star.toolTip() or "").lower()
+    assert weak_star.toolTip() == ""
+    assert weak_star._role.text() == "unsure"
 
 
 def check_severity_6_8_guards(db_path: Path) -> None:
