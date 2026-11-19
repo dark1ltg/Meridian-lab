@@ -988,7 +988,7 @@ def check_mood_map_helpers() -> None:
     assert pin_star._pin_ring.isVisible()
     assert pin_star._pin_head.isVisible()
     assert pin_star.toolTip() == ""
-    assert pin_star._role.text() == "pinned"
+    assert not hasattr(pin_star, "_role")
     assert pin_star.opacity() == 1.0, "pins stay full-bright even if stored conf is low"
 
     weak_track = SimpleNamespace(
@@ -1016,7 +1016,8 @@ def check_mood_map_helpers() -> None:
 
     assert _rgb_dist(fill, LOW_TRUST_QCOLOR) < _rgb_dist(fill, PLAYLIST_QCOLOR[Quadrant.SHELF])
     assert weak_star.toolTip() == ""
-    assert weak_star._role.text() == "unsure"
+    assert not hasattr(weak_star, "_role")
+    assert weak_star.opacity() < pin_star.opacity()
 
 
 def check_severity_6_8_guards(db_path: Path) -> None:

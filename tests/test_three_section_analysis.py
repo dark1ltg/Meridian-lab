@@ -1076,14 +1076,8 @@ def test_partial_multi_window_caps_steer() -> None:
     assert partial < full
 
 
-def test_three_tastes_that_agree_brighten_inside_the_band() -> None:
-    from meridian.features import (
-        CONFIDENCE_HIGH,
-        CONFIDENCE_LOW,
-        _merge_pcm_profiles,
-        apply_taste_agreement,
-        lift_confidence_inside_band,
-    )
+def test_three_tastes_that_agree_do_not_change_confidence() -> None:
+    from meridian.features import _merge_pcm_profiles, apply_taste_agreement
 
     close = _merge_pcm_profiles(
         None,
@@ -1094,8 +1088,7 @@ def test_three_tastes_that_agree_brighten_inside_the_band() -> None:
         },
     )
     assert close.shape_note == "steady"
-    assert close.tastes_agree is True
-    lifted, note = apply_taste_agreement(
+    stayed, note = apply_taste_agreement(
         0.70,
         "PCM",
         tastes_agree=True,
@@ -1105,11 +1098,9 @@ def test_three_tastes_that_agree_brighten_inside_the_band() -> None:
         variation=0.05,
         shape_note="steady",
     )
-    assert 0.70 < lifted < CONFIDENCE_HIGH
-    assert "tastes agree" in note
-    assert lift_confidence_inside_band(0.74) < CONFIDENCE_HIGH
-    assert lift_confidence_inside_band(0.44) < CONFIDENCE_LOW
-    assert lift_confidence_inside_band(0.80) > 0.80
+    assert stayed == 0.70
+    assert note == "PCM"
+    assert "tastes agree" not in note
 
     drop = _merge_pcm_profiles(
         None,
@@ -1119,9 +1110,9 @@ def test_three_tastes_that_agree_brighten_inside_the_band() -> None:
             "late": _prof(valence=0.50, energy=0.66),
         },
     )
-    assert drop.tastes_agree is False
+    assert drop.shape_note != "steady"
     stayed, stayed_note = apply_taste_agreement(
-        0.70,
+        0.40,
         "PCM",
         tastes_agree=False,
         multi_window=True,
@@ -1130,7 +1121,7 @@ def test_three_tastes_that_agree_brighten_inside_the_band() -> None:
         variation=0.05,
         shape_note=drop.shape_note,
     )
-    assert stayed == 0.70
+    assert stayed == 0.40
     assert stayed_note == "PCM"
 
 

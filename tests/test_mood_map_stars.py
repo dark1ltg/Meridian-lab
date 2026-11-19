@@ -55,7 +55,6 @@ from meridian.ui.mood_map import (
     queue_star_color,
     quiet_star_color,
     sky_haze,
-    star_caption,
 )
 from meridian.ui.palette import LOW_TRUST_QCOLOR, PLAYLIST_QCOLOR
 
@@ -142,7 +141,7 @@ def test_zero_confidence_draws_as_a_weak_star(qapp) -> None:
     assert zero_star.brush().color().rgb() == quiet_star_color(0).rgb()
     assert mid_star.brush().color().rgb() == quiet_star_color(1).rgb()
     assert zero_star.toolTip() == ""
-    assert star_caption(zero_star.ranked.track, playing=False) == "unsure"
+    assert not hasattr(zero_star, "_role")
 
     missing = _track(13, mood_confidence=0.5)
     missing.mood_confidence = None
@@ -345,28 +344,29 @@ def test_queue_route_is_brightest_beside_the_current_song(qapp) -> None:
     assert peak(first, second) > peak(second, third)
 
 
-def test_close_star_shows_one_line_and_no_card(qapp) -> None:
+def test_close_star_shows_its_name_and_no_caption(qapp) -> None:
     sure = _track(9, title="Bright", artist="Ada", album="Hidden", mood_confidence=0.95)
     star = TrackStar(_ranked(sure, Quadrant.DEEP))
     star.apply_style(star.ranked, current=False)
-    assert not star._role.isVisible()
     star.set_lod(1.0, True, 1.0, 0.0)
     assert star._label.isVisible()
     assert star._label.text() == "Bright"
     assert "Ada" not in star._label.text()
-    assert star._role.isVisible()
-    assert star._role.text() == "sure"
+    assert not hasattr(star, "_role")
     assert star.toolTip() == ""
-    assert star_caption(sure, playing=False) == "sure"
-    partial = _track(10, mood_confidence=0.5)
-    assert star_caption(partial, playing=False) == "partial"
-    weak = _track(11, mood_confidence=0.1)
-    assert star_caption(weak, playing=False) == "unsure"
-    missing = _track(12, mood_confidence=0.0, confidence_note="no listen · no sticker")
-    assert star_caption(missing, playing=False) == "no listen"
-    pinned = _track(13, mood_confidence=0.2, pinned=True)
-    assert star_caption(pinned, playing=False) == "pinned"
-    assert star_caption(weak, playing=True) == "playing"
+    weak = TrackStar(_ranked(_track(11, mood_confidence=0.1)))
+    weak.apply_style(weak.ranked, current=False)
+    playing = TrackStar(_ranked(_track(11, mood_confidence=0.1)))
+    playing.apply_style(playing.ranked, current=True)
+    pinned = TrackStar(_ranked(_track(13, mood_confidence=0.2, pinned=True)))
+    pinned.apply_style(pinned.ranked, current=False)
+    assert weak.brush().color().rgb() == quiet_star_color(0).rgb()
+    assert playing.brush().color().rgb() == quiet_star_color(2).rgb()
+    assert pinned.brush().color().rgb() == quiet_star_color(2).rgb()
+    assert playing.opacity() == pytest.approx(1.0)
+    assert pinned.opacity() == pytest.approx(1.0)
+    assert pinned._label.text()
+    assert playing._label.text()
 
 
 def test_song_length_changes_star_size() -> None:
@@ -1298,16 +1298,16 @@ def test_names_fade_in_as_the_count_fades(qapp) -> None:
     assert star._label.isVisible()
     assert star._label.opacity() == pytest.approx(close_name_opacity(2.4))
     assert star._label.opacity() < 0.5
-    assert star._role.isVisible()
+    assert not hasattr(star, "_role")
     assert star._count.isVisible()
     assert star._count.opacity() == pytest.approx(1.0)
     _settle_zoom(view, LOD_LABEL_START)
     star = next(star for star in view._stars.values() if star.isVisible())
     assert star._label.opacity() == pytest.approx(1.0)
-    assert star._role.opacity() == pytest.approx(1.0)
+    assert star._label.text()
     assert close_count_opacity(LOD_LABEL_START) == pytest.approx(0.0)
     assert not star._count.isVisible()
-    assert star._role.text() in {"sure", "partial", "playing"}
+    assert not hasattr(star, "_role")
 
 
 def test_medium_zoom_names_the_dot_and_a_pile_click_zooms(qapp) -> None:
@@ -1444,8 +1444,9 @@ def test_live_stars_stay_on_the_lens_and_the_edge_stays_a_picture(qapp) -> None:
         assert view._stars[tid].pos().x() == pytest.approx(places[tid][0])
         assert view._stars[tid].pos().y() == pytest.approx(places[tid][1])
     assert view._stars_take_input()
-    assert view._stars[1]._role.isVisible()
-    assert view._stars[1]._role.text()
+    assert view._stars[1]._label.isVisible()
+    assert view._stars[1]._label.text() == "Center"
+    assert not hasattr(view._stars[1], "_role")
     _settle_zoom(view, 1.0)
     assert _field_pixel(view, center_pos).alpha() > 20
     assert _field_pixel(view, edge_pos).alpha() > 20

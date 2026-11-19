@@ -1,10 +1,9 @@
-"""A tight album can dim a shaky outlier. It does not move the star."""
+"""A song far from a tight album keeps its confidence and its steer."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from meridian.features import CONFIDENCE_LOW, UNSURE_STEER_MAX
 from meridian.library import Library
 
 
@@ -35,7 +34,7 @@ def _track(lib: Library, root: Path, name: str, **overrides) -> int:
     return lib.upsert_track(payload)
 
 
-def test_a_shaky_outlier_dims_and_stays_put(tmp_path: Path) -> None:
+def test_a_far_song_on_a_tight_album_keeps_confidence_and_steer(tmp_path: Path) -> None:
     lib = Library(tmp_path / "outlier.sqlite")
     try:
         lib.add_folder(str(tmp_path))
@@ -55,21 +54,16 @@ def test_a_shaky_outlier_dims_and_stays_put(tmp_path: Path) -> None:
         before = lib.get(seed_id)
         assert before is not None
         n = lib.smooth_album_moods()
-        assert n == 1
+        assert n == 0
         after = lib.get(seed_id)
         assert after is not None
         assert after.valence == before.valence
         assert after.energy == before.energy
-        assert after.mood_confidence < before.mood_confidence
-        assert after.mood_confidence < CONFIDENCE_LOW
-        assert after.low_trust is True
-        assert "album outlier" in (after.confidence_note or "")
-        assert after.steer_weight is not None
-        assert after.steer_weight <= UNSURE_STEER_MAX
+        assert after.mood_confidence == before.mood_confidence
+        assert after.steer_weight == before.steer_weight
+        assert after.confidence_note == before.confidence_note
+        assert "album outlier" not in (after.confidence_note or "")
         assert lib.smooth_album_moods() == 0
-        again = lib.get(seed_id)
-        assert again is not None
-        assert again.mood_confidence == after.mood_confidence
     finally:
         lib.close()
 

@@ -587,10 +587,10 @@ class Library:
         _ = last_err
 
     def smooth_album_moods(self, max_shift: float = 0.08, blend: float = 0.30) -> int:
-        """Dim a shaky outlier on a tight album. Stars stay where the listen put them.
+        """A song far from a tight album keeps its confidence and its steer.
 
-        ``max_shift`` and ``blend`` are unused. They remain so older callers still run.
-        Groups by albumartist when present (VA/OST/classical-safe), else artist.
+        The star stays where the listen put it. ``max_shift`` and ``blend`` are
+        unused. They remain so older callers still run.
         """
         del max_shift, blend
         return self.dim_tight_album_outliers()
@@ -601,117 +601,11 @@ class Library:
         return 0
 
     def dim_tight_album_outliers(self) -> int:
-        """Dim a shaky song that sits far from a tight album. Do not move it.
+        """A far song on a tight album does not lose confidence or have its steer capped.
 
-        A steady song stays bright, including a ballad on a dance album.
-        A scattered album, such as a compilation, dims nobody. A pin is skipped.
-        The same song is not dimmed again on a later pass. Steer drops with the
-        sureness so the queue does not keep leading with an unsure star.
+        The star stays where the listen put it.
         """
-        import math
-        from statistics import median
-
-        from meridian.features import CONFIDENCE_LOW, UNSURE_STEER_MAX, confidence_low_trust
-
-        tight_max = 0.12
-        far_min = 0.28
-        dim_step = 0.06
-
-        with self.lock:
-            rows = self.conn.execute(
-                """
-                SELECT id, artist, albumartist, album, valence, energy, pinned,
-                       low_trust, mood_confidence, confidence_note, steer_weight
-                FROM tracks
-                WHERE analyzed = 1
-                  AND album IS NOT NULL AND TRIM(album) != ''
-                  AND (
-                    (albumartist IS NOT NULL AND TRIM(albumartist) != '')
-                    OR (artist IS NOT NULL AND TRIM(artist) != '')
-                  )
-                """
-            ).fetchall()
-
-        def album_key(row) -> tuple[str, str]:
-            albumartist = str(row["albumartist"] or "").strip()
-            artist = str(row["artist"] or "").strip()
-            credit = (
-                albumartist
-                if albumartist and albumartist.lower() not in {"various artists", "various", "va"}
-                else artist
-            )
-            return (credit.lower(), str(row["album"] or "").lower().strip())
-
-        def confidence_of(row) -> float:
-            try:
-                value = float(row["mood_confidence"])
-            except (TypeError, ValueError):
-                return 0.5
-            if not math.isfinite(value):
-                return 0.5
-            return value
-
-        groups: dict[tuple[str, str], list] = {}
-        for row in rows:
-            groups.setdefault(album_key(row), []).append(row)
-
-        updates: list[tuple[float, int, str, float, int]] = []
-        for items in groups.values():
-            if len(items) < 4:
-                continue
-            trusted = [
-                item
-                for item in items
-                if not int(item["pinned"] or 0) and confidence_of(item) >= CONFIDENCE_LOW
-            ]
-            if len(trusted) < 3:
-                continue
-            med_v = float(median(float(item["valence"]) for item in trusted))
-            med_e = float(median(float(item["energy"]) for item in trusted))
-            spread = max(
-                math.hypot(float(item["valence"]) - med_v, float(item["energy"]) - med_e)
-                for item in trusted
-            )
-            if spread > tight_max:
-                continue
-            for item in items:
-                if int(item["pinned"] or 0):
-                    continue
-                conf = confidence_of(item)
-                if conf >= CONFIDENCE_LOW:
-                    continue
-                note_raw = item["confidence_note"] if "confidence_note" in item.keys() else ""
-                if "album outlier" in (note_raw or ""):
-                    continue
-                distance = math.hypot(float(item["valence"]) - med_v, float(item["energy"]) - med_e)
-                if distance < far_min:
-                    continue
-                dimmed = max(0.0, conf - dim_step)
-                try:
-                    steer = float(item["steer_weight"]) if item["steer_weight"] is not None else UNSURE_STEER_MAX
-                except (TypeError, ValueError):
-                    steer = UNSURE_STEER_MAX
-                if not math.isfinite(steer):
-                    steer = UNSURE_STEER_MAX
-                steer = min(steer, UNSURE_STEER_MAX)
-                note = self._append_note(note_raw, "album outlier")
-                updates.append(
-                    (dimmed, int(confidence_low_trust(dimmed)), note, steer, int(item["id"]))
-                )
-
-        if not updates:
-            return 0
-        with self.lock:
-            self.conn.executemany(
-                """
-                UPDATE tracks
-                SET mood_confidence = ?, low_trust = ?, confidence_note = ?, steer_weight = ?
-                WHERE id = ? AND pinned = 0
-                """,
-                updates,
-            )
-            self.conn.commit()
-        return len(updates)
+        return 0
 
     def spread_album_acoustics(self, max_shift: float = 0.07) -> int:
         """Songs that share a spot stay stacked. Neighbors do not nudge them apart."""

@@ -479,23 +479,6 @@ def short_star_name(track: object) -> str:
     return title
 
 
-def star_caption(track: object, *, playing: bool) -> str:
-    """One short line under a close star. Not a card."""
-    if playing:
-        return "playing"
-    if bool(getattr(track, "pinned", False)):
-        return "pinned"
-    note = str(getattr(track, "confidence_note", "") or "").lower()
-    if "no listen" in note:
-        return "no listen"
-    conf = read_mood_confidence(track)
-    if conf >= CONFIDENCE_HIGH:
-        return "sure"
-    if conf >= CONFIDENCE_LOW:
-        return "partial"
-    return "unsure"
-
-
 def group_exact_spots(points: list[tuple[int, float, float]]) -> list[list[int]]:
     """Group songs that already share a spot. Positions are not moved."""
     cell = STACK_POINT
@@ -867,12 +850,6 @@ class TrackStar(QGraphicsEllipseItem):
         self._count.setBrush(QBrush(QColor("#f7f4ff")))
         self._count.setFont(sans(9, medium=True))
         self._count.hide()
-        self._role = QGraphicsSimpleTextItem(self)
-        self._role.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
-        self._role.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
-        self._role.setZValue(31)
-        self._role.setFont(sans(8, medium=True))
-        self._role.hide()
         self._lod_key = (-1, False, False)
         self._body_scale = 1.0
         self._trust_opacity = 1.0
@@ -1005,7 +982,7 @@ class TrackStar(QGraphicsEllipseItem):
             self._pin_ring.hide()
             self._pin_head.hide()
 
-        # The name and one line are drawn on the star. No hover card.
+        # The name is drawn on the star. Brightness shows how sure the spot is. No hover card.
         self.setToolTip("")
 
         glow_r = r * (3.8 if pinned else 3.4) * (1.0 + 0.55 * haze)
@@ -1020,12 +997,8 @@ class TrackStar(QGraphicsEllipseItem):
         self._glow.setBrush(QBrush(glow_c))
 
         self._label.setText(short_star_name(ranked.track))
-        self._role.setText(star_caption(ranked.track, playing=current))
         br = self._label.boundingRect()
         self._label.setPos(-br.width() / 2, r + (8 if pinned else 3))
-        role_box = self._role.boundingRect()
-        self._role.setPos(-role_box.width() / 2, r + br.height() + (6 if pinned else 2))
-        self._role.setBrush(QBrush(QColor("#d5dbe8")))
         if inside:
             label_ink = QColor(PLAYLIST_QCOLOR[ranked.quadrant])
             if current or pinned:
@@ -1057,7 +1030,7 @@ class TrackStar(QGraphicsEllipseItem):
         show_glow = glow_a > 0.02
         name_step = int(round(name_opacity * 20))
         count_step = int(round(count_opacity * 20))
-        key = (int(glow_a * 20), show_glow, label_on, name_step, count_step, self._role.text())
+        key = (int(glow_a * 20), show_glow, label_on, name_step, count_step)
         if key == self._lod_key:
             return
         self._lod_key = key
@@ -1068,12 +1041,9 @@ class TrackStar(QGraphicsEllipseItem):
             self._glow.hide()
         if label_on and name_opacity > 0.02:
             self._label.setOpacity(name_opacity)
-            self._role.setOpacity(name_opacity)
             self._label.show()
-            self._role.show()
         else:
             self._label.hide()
-            self._role.hide()
         if len(self._stack_ids) > 1 and count_opacity > 0.02:
             self._count.setOpacity(count_opacity)
             self._count.show()
@@ -3051,7 +3021,6 @@ class MoodMap(QGraphicsView):
             star.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, take)
             star.setAcceptedMouseButtons(buttons)
             star._label.setAcceptedMouseButtons(buttons)
-            star._role.setAcceptedMouseButtons(buttons)
             if strength <= 0.02 and tid not in locked:
                 star.hide()
                 continue

@@ -331,6 +331,7 @@ def legacy_taste_marks(track: object) -> list[tuple[str, int]]:
         mark = _ms("mid") or (plan[0][0], int(round(float(plan[0][1]) * 1000.0)))
         return [mark]
     shape = str(getattr(track, "shape_note", "") or "").strip()
+    # Older rows may still say "tastes agree". A new listen does not add that phrase.
     if shape or "tastes agree" in note:
         return [(name, int(round(float(start_s) * 1000.0))) for name, start_s in plan]
     name, start_s = plan[0]
@@ -389,8 +390,6 @@ CONTAINER_SEED_KEYS = frozenset(
 # Graduated confidence bands (UI + low_trust compat).
 CONFIDENCE_LOW = 0.45
 CONFIDENCE_HIGH = 0.75
-# Small lift when intro, mid, and late land close. It cannot cross a band line.
-AGREEMENT_LIFT = 0.03
 # Queue NOW rejects steer under 0.20. Unsure confidence stays under that line.
 UNSURE_STEER_MAX = 0.19
 
@@ -1918,55 +1917,6 @@ def _weighted_profile_blend(items: list[tuple[object, float]]):
     )
 
 
-def _three_tastes_agree(role_profiles: dict[str, object]) -> bool:
-    """True when intro, mid, and late sit close on both axes.
-
-    A build, drop, or bookend is not agreement. A clear fight that never
-    earns one of those names is not agreement either.
-    """
-    needed = ("intro", "mid", "late")
-    if any(role not in role_profiles for role in needed):
-        return False
-
-    def _axis(role: str) -> tuple[float, float]:
-        profile = role_profiles[role]
-        valence = float(getattr(profile, "valence", 0.5) or 0.5)
-        energy = float(getattr(profile, "energy", 0.5) or 0.5)
-        if not np.isfinite(valence):
-            valence = 0.5
-        if not np.isfinite(energy):
-            energy = 0.5
-        return valence, energy
-
-    points = [_axis(role) for role in needed]
-    max_disagree = 0.0
-    for i, (va, ea) in enumerate(points):
-        for vb, eb in points[i + 1 :]:
-            max_disagree = max(max_disagree, float(np.hypot(va - vb, ea - eb)))
-    span = max(point[1] for point in points) - min(point[1] for point in points)
-    return max_disagree < SHAPE_DISAGREE_CLEAR and span < SHAPE_ENERGY_SPAN_CLEAR
-
-
-def lift_confidence_inside_band(score: float, lift: float = AGREEMENT_LIFT) -> float:
-    """Add a little sureness without crossing the unsure line or the bright line."""
-    try:
-        value = float(score)
-    except (TypeError, ValueError):
-        return 0.0
-    if not np.isfinite(value):
-        return 0.0
-    value = float(np.clip(value, 0.0, 1.0))
-    if lift <= 0.0:
-        return value
-    if value < CONFIDENCE_LOW:
-        ceiling = CONFIDENCE_LOW - 0.01
-    elif value < CONFIDENCE_HIGH:
-        ceiling = CONFIDENCE_HIGH - 0.01
-    else:
-        ceiling = 1.0
-    return float(min(value + float(lift), max(value, ceiling)))
-
-
 def apply_taste_agreement(
     confidence: float,
     note: str,
@@ -1978,24 +1928,15 @@ def apply_taste_agreement(
     variation: float,
     shape_note: str | None,
 ) -> tuple[float, str]:
-    """Brighten a star a little when the three tastes agree. The spot stays put."""
-    if not tastes_agree or not multi_window or pcm_fallback or pcm_unstable:
-        return float(confidence), note
-    if shape_note != "steady":
-        return float(confidence), note
+    """Opening, middle, and end agreeing does not change confidence or the note."""
+    del tastes_agree, multi_window, pcm_fallback, pcm_unstable, variation, shape_note
     try:
-        spread = float(variation)
+        value = float(confidence)
     except (TypeError, ValueError):
-        spread = 1.0
-    if not np.isfinite(spread) or spread >= 0.28:
-        return float(confidence), note
-    lifted = lift_confidence_inside_band(confidence)
-    if lifted <= float(confidence) + 1e-6:
-        return float(confidence), note
-    text = (note or "").strip()
-    if "tastes agree" not in text:
-        text = f"{text} · tastes agree" if text else "tastes agree"
-    return lifted, text
+        return 0.0, note
+    if not np.isfinite(value):
+        return 0.0, note
+    return value, note
 
 
 def _attach_shape(profile, role_profiles: dict[str, object]):
@@ -2003,7 +1944,6 @@ def _attach_shape(profile, role_profiles: dict[str, object]):
     note = shape_note_from_roles(role_profiles)
     try:
         profile.shape_note = note
-        profile.tastes_agree = _three_tastes_agree(role_profiles)
     except Exception:
         pass
     return profile

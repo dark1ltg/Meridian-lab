@@ -1,6 +1,6 @@
 # How Meridian listens (audio analysis)
 
-This guide explains, in plain language, how Meridian takes a **short listen** of each track on your disk. It matches lab `main` as of 2026-11-11.  
+This guide explains, in plain language, how Meridian takes a **short listen** of each track on your disk. It matches lab `main` as of 2026-11-19.  
 It does not need the internet. It does not stream music.
 
 For how that listen turns into a star on the map, see [How stars get placed](placement-pipeline.md).
@@ -88,7 +88,7 @@ Simple rules of thumb Meridian tries to follow:
 
 ### 5. Save the result
 
-It stores the map position, a confidence note (“how sure are we” — three tastes that agree say so), shape/timbre/steer leftovers when known, and a few other clues (brightness, flux, steady rhythm, speech share, whether the pulse was refused) for later tidy-ups — **without** listening again. A stored confidence of exactly zero stays rock-bottom. A missing confidence is the neutral middle, not the same thing as zero.
+It stores the map position, a confidence note (“how sure are we”), shape/timbre/steer leftovers when known, and a few other clues (brightness, flux, steady rhythm, speech share, whether the pulse was refused) for later tidy-ups — **without** listening again. Opening, middle, and end agreeing does not change that confidence. A stored confidence of exactly zero stays rock-bottom. A missing confidence is the neutral middle, not the same thing as zero.
 
 **Rescan / mtime refresh:** when Meridian clears the “analyzed” flag so a track will be listened to again, it still **keeps the existing PCM mood coords** if leftover brightness/flux clues remain — so Rescan does not flash stars back to genre seeds until a new successful decode lands. Section blend weights are deterministic (no random jitter on merge).
 
@@ -96,8 +96,8 @@ It stores the map position, a confidence note (“how sure are we” — three t
 
 When a batch of listens finishes, Meridian does light housekeeping with **no more audio decode**:
 
-- If the start, middle, and end agreed, that star was already made a little more sure. Housekeeping does not move it for that.  
-- A shaky song far from a tight album becomes a little less sure. It is not pulled toward the album, and songs by the same artist do not pull it either. Songs on the same dot stay stacked.  
+- If the start, middle, and end agreed, confidence stays as the listen set it. Housekeeping does not move the star for that.  
+- A song far from a tight album keeps its confidence, and its steer is not capped for that. It stays where the listen put it. Songs by the same artist do not pull it. Songs on the same dot stay stacked.  
 - Stretch positions so your collection uses the map more evenly.  
 
 If you **pinned** a star, that pin stays. Analyze will not drag it.

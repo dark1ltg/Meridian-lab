@@ -1,10 +1,10 @@
 # Changelog
 
-All notable Meridian releases are listed here. The stable AppImage is on [Meridian releases](https://github.com/dark1ltg/Meridian/releases). The lab AppImage is on [Meridian-lab releases](https://github.com/dark1ltg/Meridian-lab/releases). The lab v1.3.6 AppImage was refreshed 2026-11-11 and points at `bebfe01c3ba11ed253ddb9bd5da2cd1580f50ac2`. The stable dark1ltg/Meridian v1.3.6 download is still the October 18, 2026 file.
+All notable Meridian releases are listed here. The stable AppImage is on [Meridian releases](https://github.com/dark1ltg/Meridian/releases). The lab AppImage is on [Meridian-lab releases](https://github.com/dark1ltg/Meridian-lab/releases). The lab v1.3.6 AppImage was refreshed 2026-11-19. The stable dark1ltg/Meridian v1.3.6 download is still the October 18, 2026 file.
 
-## [1.3.6](https://github.com/dark1ltg/Meridian-lab/releases/tag/v1.3.6) — 2026-09-10 (AppImage refreshed 2026-11-11)
+## [1.3.6](https://github.com/dark1ltg/Meridian-lab/releases/tag/v1.3.6) — 2026-09-10 (AppImage refreshed 2026-11-19)
 
-Version stays **1.3.6**. This refresh keeps the small LGPL ffmpeg, the time-bar ticks, and a star for every imported song. The sky zooms in stops and does not move a star to unstack. It keeps the more honest listen, the more careful queue, and the earlier path-to-9 / dual-worker / map-completeness work.
+Version stays **1.3.6**. This refresh keeps the small LGPL ffmpeg, the time-bar ticks, and a star for every imported song. The sky zooms in stops and does not move a star to unstack. A close star shows its name, and brightness shows how sure the spot is. Agreeing tastes do not raise confidence. A song far from a tight album keeps the confidence the listen gave it. It keeps the more honest listen, the more careful queue, and the earlier path-to-9 / dual-worker / map-completeness work.
 
 ### Analysis & honesty (this AppImage)
 
@@ -41,16 +41,24 @@ Version stays **1.3.6**. This refresh keeps the small LGPL ffmpeg, the time-bar 
 - At 2.4× the songs on a spot become real stars and stay the size they had at that dive. The count fades by 2.6×. A shared exact spot stays one dot. A click lists the songs, and the scroll wheel walks through them. The live stars are the ones inside the lens and on screen, up to 220, nearest the middle of the lens. The wide picture is cut out of that cluster. The edges of the view stay the picture.
 - A crowd no longer wears a glow. The soft halo stays on the song that is playing, on a pin, on the star under the pointer, and on songs that have room around them.
 - Songs a closer constellation line already joins gather into an unmarked shape. A long line stays a line. Songs piled on one spot stay a pile, and nothing on the map is moved.
-- The quarter grid is gone. The four corners carry colder or warmer light. Diving in fades the constellations. A close star shows a short name and one line: how sure the spot is, or “no listen” when that is why it sits in the middle. A pin shows that it is pinned. The song that is playing shows that it is playing. There is no card on the star.
+- The quarter grid is gone. The four corners carry colder or warmer light. Diving in fades the constellations. A close star shows a short name. Brightness shows how sure the spot is. A pin and the playing song stay brighter. There is no card on the star.
+
+### Lab, published 2026-11-19
+
+These are on lab `main`. The lab AppImage was built from that tree on 2026-11-19 (America/New_York) and published on the [Meridian-lab releases page](https://github.com/dark1ltg/Meridian-lab/releases). The date stamped on that image is that same Eastern Time day.
+
+- A close star shows its name. It does not show a second line for sure, partial, unsure, “no listen”, pinned, or playing. Brightness shows how sure the spot is. A pin and the playing song stay brighter. There is no card on the star.
+- When the opening, middle, and end of a listen agree, that does not change confidence. The spot stays put.
+- A song far from a tight album does not lose confidence, and its steer is not capped for that. The star stays where the listen put it. A pin is left alone. Songs that share a dot stay stacked.
 
 ### Lab, published 2026-11-11
 
-These are on lab `main`. The lab AppImage published that day was built from `bebfe01c3ba11ed253ddb9bd5da2cd1580f50ac2` on 2026-11-11 (America/New_York) and is on the [Meridian-lab releases page](https://github.com/dark1ltg/Meridian-lab/releases). The date stamped on that image is that same Eastern Time day.
+These are on lab `main`. The lab AppImage published that day was built from `bebfe01c3ba11ed253ddb9bd5da2cd1580f50ac2` on 2026-11-11 (America/New_York). The 2026-11-19 refresh replaced that download. The date stamped on that image was that same Eastern Time day. The one-line caption on a close star shipped in that image and was removed on 2026-11-19.
 
 - The sky zooms in stops, and a star never moves to unstack. A pin stays. Songs on one exact spot stay one dot.
 - Under 1.6× the sky is the wide picture. Several songs on a spot are one dot and a count. A song alone is one dot. Coarse neighborhood lines are visible. No names. Nothing can be dragged.
 - From 1.6× to 2.4× the sharper patch stays. The coarse lines fade and are gone at 2.4×. Finer neighborhood lines are not drawn. A pile is still one dot and a count. The dot under the pointer can show a short name. Clicking a pile zooms closer. Stars cannot be grabbed in this band, including while a pinch is in progress. A drag pins a star only after the zoom has settled.
-- At 2.4× the lines are gone. The count fades and the songs in that spot become real stars, still on the places they already had. Names come in dim and are readable by 2.6×. Each close star can show one short line: how sure the spot is, or “no listen” when that is why it sits in the middle. A pin shows that it is pinned. The song that is playing shows that it is playing. Artist and album stay in the lists and the bar. There is no card on the star.
+- At 2.4× the lines are gone. The count fades and the songs in that spot become real stars, still on the places they already had. Names come in dim and are readable by 2.6×. That day’s image also drew one short line on a close star (how sure the spot was, or “no listen”, plus pinned or playing). That line was removed on 2026-11-19. Artist and album stay in the lists and the bar. There is no card on the star.
 - The zoom stops at 5×. From 2.6× to 5× the same stars stay on their spots, so a loose cluster opens up. The 220 live stars are spent on the cluster under the lens. The wide picture is cut out of that cluster. The edges of the view stay the picture. You can drag a settled close star. A pin and the playing song stay bright.
 
 ### Lab, published 2026-11-08
@@ -78,8 +86,8 @@ These are on lab `main`. The lab AppImage was built from that tree on 2026-11-04
 - A confidence of exactly zero draws as a weak pewter star. A missing confidence still draws as the neutral middle.
 - After a finish or a skip, that one unpinned star slides from a pewter ghost to its new spot. Clicks follow it. A press during the slide puts the star back on the sky. Constellation lines, neighborhood tiles, and the queue path aim at the new spot when the slide starts. A pin does not slide.
 - Choosing a search result draws a short cool line from where the lens was to that song, then the line fades. It is not the queue path. If the lens is already on that song, no line is drawn.
-- When the start, middle, and end of a long song agree, that star looks a little more sure. The spot does not move, and the lift stays inside the sureness band it already had. A build, a drop, or a loud-both-ends song does not get that bonus. An unsure star stays out of NOW. A middle or white star can still lead.
-- A shaky song that sits far from a tight album looks a little less sure, and the queue treats it that way. The star stays where the listen put it. A steady song stays bright and stays put. Other songs by the same artist do not pull it. Songs that share a dot stay stacked. A pin is left alone.
+- Superseded on 2026-11-19. What shipped this day: when the start, middle, and end of a long song agree, that star looks a little more sure. The spot does not move, and the lift stays inside the sureness band it already had. A build, a drop, or a loud-both-ends song does not get that bonus. An unsure star stays out of NOW. A middle or white star can still lead.
+- Superseded on 2026-11-19. What shipped this day: a shaky song that sits far from a tight album looks a little less sure, and the queue treats it that way. The star stays where the listen put it. A steady song stays bright and stays put. Other songs by the same artist do not pull it. Songs that share a dot stay stacked. A pin is left alone.
 - Superseded on 2026-11-11 by the zoom stops above. What shipped this day: zooming in a little, once the pinch has stopped, draws a sharper picture of only the patch on screen. That picture looks up only the songs in the patch. A bit closer, that picture is replaced by a tighter one of the same patch. Only one of those pictures is kept. The wide view stays the one picture of the whole sky. A short pan reuses the picture you have. Neighborhood lines get finer in that middle zoom, and the finer lines are drawn the first time you go there. In close, the pictures step aside and the clickable stars take over. A pinch that starts up close keeps those stars on the sky until you let go. While the pinch moves, the pile fades and those stars cannot be dragged. When you let go before the close view, the picture is whole again. The star under the pointer brightens on the wide sky too. A small move of a search match updates its glow. Search still blacks out the sky. A star that is sliding is left out of the sharper picture, so the moving star is drawn once. Pinning a song, or the song that starts playing, updates that one star. The rest of the sky stays as it was. Stars packed together draw dimmer. The song that is playing, a pin, and the star under the pointer stay bright. The search glow stays put when the same songs still match.
 
 ### What’s new (plain English)
@@ -110,7 +118,7 @@ These are on lab `main`. The lab AppImage was built from that tree on 2026-11-04
 
 **Rough placements stay honestly dim**
 - Start-only / end-only / ends-only listens stay low-confidence so they look unsure on the map.
-- Album tidy can make a shaky song look less sure. It does not pull the star toward album mates, and it does not promote a rough listen into “looks trusted.”
+- Album tidy does not drop confidence or cap steer because a song sits far from a tight album. It does not pull the star toward album mates, and it does not promote a rough listen into “looks trusted.”
 - A longer salvage listen of a pad/intro head still stays marked intro-only / unsure.
 
 **Honest status messages**
@@ -149,7 +157,7 @@ These are on lab `main`. The lab AppImage was built from that tree on 2026-11-04
 
 - AppImage baseline remains Ubuntu 24.04 / glibc 2.38+.
 - The AppImage ships a static **LGPL ffmpeg** for mood analysis and puts it first on PATH. It is decode-only (no libx264, no libx265, no `--enable-gpl`, no nonfree). A source checkout still needs a host ffmpeg. System **libx264** is still required for H.264 playback through Qt’s FFmpeg plugin (not bundled).
-- Release AppImage refreshed **2026-11-11** and published on the Meridian-lab releases page. That image points at `bebfe01c3ba11ed253ddb9bd5da2cd1580f50ac2` (SHA256 `d2651e6c06dffce84cbe90566e41dd64880312b33fe461d12f6c719b42a1ca76`). It has the zoom stops (wide picture, one sharper patch, live stars at 2.4×, ceiling 5×, the wide picture cut out of the close cluster) on top of the time-bar taste ticks, the bundled LGPL ffmpeg, the lab sky, the analysis upgrades, placement honesty, and the kept-prior defer fix (plus earlier path-to-9 / dual-worker / map-completeness work).
+- Release AppImage refreshed **2026-11-19** and published on the Meridian-lab releases page. It keeps the zoom stops (wide picture, one sharper patch, live stars at 2.4×, ceiling 5×, the wide picture cut out of the close cluster), the time-bar taste ticks, the bundled LGPL ffmpeg, and a star for every song. A close star shows its name. Brightness shows how sure the spot is. Agreeing tastes do not change confidence. A song far from a tight album does not lose confidence or have its steer capped.
 - **Bug fix:** AppImage AppStream stamp now updates only the newest release row (older history like 1.3.5 stays intact).
 - **Bug fix:** GitHub “Refresh AppImage” workflow no longer fails with Permission denied when writing the SHA256 checksum after a Docker/proot build.
 
@@ -175,7 +183,7 @@ Richer acoustic mood cues from the existing PCM decode budget, smarter local rec
 - Structure-aware soft/genre clamps: steady rhythm + genre disagreement trusts PCM more; unstable material hugs the seed
 - When tag and detected BPM conflict, energy nudge trusts detected if rhythm is steady, otherwise the tag
 - Persists onset consistency, spectral flux, and brightness for Focus ranking (no re-decode)
-- 1.3.5 nudged rough songs toward an album and eased copies off the same dot. Lab main, published 2026-10-22, leaves those dots put. A shaky song far from a tight album only looks less sure.
+- 1.3.5 nudged rough songs toward an album and eased copies off the same dot. Lab main, published 2026-10-22, leaves those dots put. A song far from a tight album keeps the confidence the listen gave it.
 - Expanded local genre seeds (phonk, hyperpop, drill, vaporwave, amapiano, city pop, and related aliases)
 - Pins, metadata, and total decode budget unchanged
 
